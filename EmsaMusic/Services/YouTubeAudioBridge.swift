@@ -32,13 +32,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             if (window.__bgPlaybackInstalled) { return; }
             window.__bgPlaybackInstalled = true;
 
-            var hiddenAt = 0;
-            var wasPlaying = false;
-
-            function currentVideo() {
-                return document.querySelector('video');
-            }
-
             // Keep document reporting visible
             function define(target, name, value) {
                 try {
@@ -53,57 +46,14 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 Document.prototype.hasFocus = function () { return true; };
             } catch (e) {}
 
-            // Called as app loses focus / transitions to background
-            window.__bgCapture = function () {
-                var video = currentVideo();
-                hiddenAt = Date.now();
-                wasPlaying = !!(video && !video.paused && !video.ended);
-            };
-
-            window.__bgResume = function () {
-                var video = currentVideo();
-                if (!video || !wasPlaying || !video.paused || video.ended) { return; }
-                if (Date.now() - hiddenAt > 4000) { return; }
-                var promise = video.play();
-                if (promise && promise.catch) { promise.catch(function () {}); }
-                if (typeof player !== 'undefined' && player.playVideo && player.getPlayerState && player.getPlayerState() === 2) {
-                    player.playVideo();
-                }
-            };
-
-            window.addEventListener('blur', function (event) {
-                event.stopImmediatePropagation();
-            }, true);
-
-            // Swallow visibilitychange events so YouTube does not pause on backgrounding
             function swallow(event) {
-                var video = currentVideo();
-                hiddenAt = Date.now();
-                if (video && !video.paused && !video.ended) { wasPlaying = true; }
                 event.stopImmediatePropagation();
             }
             window.addEventListener('visibilitychange', swallow, true);
             document.addEventListener('visibilitychange', swallow, true);
             window.addEventListener('webkitvisibilitychange', swallow, true);
             document.addEventListener('webkitvisibilitychange', swallow, true);
-            window.addEventListener('pagehide', function (event) {
-                var video = currentVideo();
-                hiddenAt = Date.now();
-                wasPlaying = !!(video && !video.paused && !video.ended);
-            }, true);
-
-            // Safety net: Only auto-resume if pause happened within 2000ms of app minimize/lock
-            document.addEventListener('pause', function (event) {
-                var video = event.target;
-                if (!video || video.tagName !== 'VIDEO') { return; }
-                if (!wasPlaying || Date.now() - hiddenAt > 2000) { return; }
-                var resume = function () {
-                    var promise = video.play();
-                    if (promise && promise.catch) { promise.catch(function () {}); }
-                };
-                resume();
-                setTimeout(resume, 200);
-            }, true);
+            window.addEventListener('blur', swallow, true);
         })();
         """
         let userScript = WKUserScript(source: backgroundScriptSource, injectionTime: .atDocumentStart, forMainFrameOnly: false)
@@ -124,7 +74,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.webView?.evaluateJavaScript("window.__bgCapture && window.__bgCapture();", completionHandler: nil)
+            self?.keepPlayingInBackground()
         }
         
         center.addObserver(
@@ -149,8 +99,14 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         Task { [weak self] in
             for _ in 0..<15 {
                 guard let self = self, AudioPlayerManager.shared.isPlaying else { break }
-                _ = try? await self.webView?.evaluateJavaScript("window.__bgResume && window.__bgResume();")
-                try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
+                _ = try? await self.webView?.evaluateJavaScript("""
+                if (typeof player !== 'undefined' && player.playVideo) {
+                    if (typeof player.getPlayerState === 'function' && player.getPlayerState() !== 1) {
+                        player.playVideo();
+                    }
+                }
+                """)
+                try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
             }
             self?.endBackgroundTask()
         }
