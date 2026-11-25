@@ -66,6 +66,27 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         self.webView = wv
     }
     
+    func attachToRootWindow() {
+        DispatchQueue.main.async {
+            guard let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }) as? UIWindowScene ?? UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self.attachToRootWindow()
+                }
+                return
+            }
+            
+            if let wv = self.webView, wv.superview != window {
+                wv.removeFromSuperview()
+                wv.frame = CGRect(x: 0, y: 0, width: 2, height: 2)
+                wv.alpha = 0.01
+                wv.isUserInteractionEnabled = false
+                window.addSubview(wv)
+                print("[YouTubeAudioBridge] Attached permanently to root UIWindow!")
+            }
+        }
+    }
+    
     private func observeLifecycle() {
         let center = NotificationCenter.default
         
@@ -135,6 +156,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
           var player;
+          var userWantsPause = false;
 
           function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
@@ -161,6 +183,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerReady(event) {
+            userWantsPause = false;
             event.target.playVideo();
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "ready",
@@ -178,6 +201,13 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerStateChange(event) {
+            // Anti-Pause on tab switch / minimize: If user didn't ask to pause, resume immediately and don't notify Swift
+            if (event.data === 2 && !userWantsPause) {
+              if (player && player.playVideo) {
+                player.playVideo();
+              }
+              return;
+            }
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "stateChange",
               state: event.data
@@ -192,14 +222,17 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           window.userPlay = function() {
+            userWantsPause = false;
             if (player && player.playVideo) player.playVideo();
           };
 
           window.userPause = function() {
+            userWantsPause = true;
             if (player && player.pauseVideo) player.pauseVideo();
           };
 
           window.swapTrack = function(newVid, keepSeconds) {
+            userWantsPause = false;
             if (player && player.loadVideoById) {
               player.loadVideoById({
                 videoId: newVid,

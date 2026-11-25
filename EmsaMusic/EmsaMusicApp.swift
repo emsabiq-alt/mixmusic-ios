@@ -15,12 +15,11 @@ struct EmsaMusicApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                HeadlessAudioBridgeView()
-                    .frame(width: 320, height: 180)
-                MainTabView()
-            }
-            .preferredColorScheme(.dark)
+            MainTabView()
+                .preferredColorScheme(.dark)
+                .onAppear {
+                    YouTubeAudioBridge.shared.attachToRootWindow()
+                }
         }
     }
 }
