@@ -1,0 +1,52 @@
+name: Build Unsigned iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Select Active Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build App Bundle (Unsigned)
+        run: |
+          xcodebuild clean build \
+            -project MixMusic.xcodeproj \
+            -scheme MixMusic \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            BUILD_DIR="build"
+
+      - name: Package into IPA Archive
+        run: |
+          mkdir -p Payload
+          # Copy compiled .app bundle into Payload directory
+          cp -r build/Release-iphoneos/*.app Payload/
+          # Create zip archive renamed to .ipa
+          zip -r -9 MixMusic-iOS.ipa Payload
+          rm -rf Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MixMusic-iOS
+          path: MixMusic-iOS.ipa
+          retention-days: 14
+
+      - name: Create GitHub Release (On Tag)
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: MixMusic-iOS.ipa
+          generate_release_notes: true
