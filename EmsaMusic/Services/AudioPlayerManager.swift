@@ -186,6 +186,7 @@ class AudioPlayerManager: ObservableObject {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
             ]
         ])
+        let playerItem = AVPlayerItem(asset: asset)
         playerItem.preferredForwardBufferDuration = 1.0
         
         if self.avPlayer == nil {
