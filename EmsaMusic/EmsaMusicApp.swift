@@ -3,12 +3,10 @@ import AVFoundation
 
 @main
 struct EmsaMusicApp: App {
-    @Environment(\.scenePhase) var scenePhase
-    
     init() {
         // Activate background audio playback on iOS startup
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay])
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("[EmsaMusicApp] Failed to set background audio category: \(error)")
@@ -21,17 +19,10 @@ struct EmsaMusicApp: App {
                 MainTabView()
                 HeadlessAudioBridgeView()
                     .frame(width: 320, height: 180)
-                    .offset(x: -2000, y: -2000)
+                    .opacity(0.01)
                     .allowsHitTesting(false)
             }
             .preferredColorScheme(.dark)
-        }
-        .onChange(of: scenePhase) { phase in
-            if phase == .background {
-                if AudioPlayerManager.shared.isPlaying {
-                    BackgroundAudioKeeper.shared.start()
-                }
-            }
         }
     }
 }
