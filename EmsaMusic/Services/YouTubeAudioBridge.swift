@@ -9,6 +9,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     
     var webView: WKWebView?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundResumeTask: Task<Void, Never>?
     
     override init() {
         super.init()
@@ -26,13 +27,12 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         let contentController = WKUserContentController()
         contentController.add(self, name: "audioBridge")
         
-        // Injected background playback script across all frames
+        // Multi-frame scriptlet: Prevents automatic background pause while allowing intentional user pause
         let backgroundScriptSource = """
         (function () {
             if (window.__bgPlaybackInstalled) { return; }
             window.__bgPlaybackInstalled = true;
 
-            // Keep document reporting visible
             function define(target, name, value) {
                 try {
                     Object.defineProperty(target, name, { get: function () { return value; }, configurable: true });
@@ -45,6 +45,33 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             try {
                 Document.prototype.hasFocus = function () { return true; };
             } catch (e) {}
+
+            window.__isUserPause = false;
+
+            // Cross-frame message receiver for user-initiated pause/play
+            window.addEventListener('message', function(e) {
+                if (e.data === 'EMSA_USER_PAUSE') {
+                    window.__isUserPause = true;
+                    var v = document.querySelector('video');
+                    if (v && v.__realPause) { v.__realPause(); }
+                } else if (e.data === 'EMSA_USER_PLAY') {
+                    window.__isUserPause = false;
+                    var v = document.querySelector('video');
+                    if (v) { v.play().catch(function(){}); }
+                }
+            });
+
+            // Intercept HTMLMediaElement.prototype.pause so WebKit backgrounding CANNOT pause the video
+            if (!HTMLMediaElement.prototype.__realPause) {
+                HTMLMediaElement.prototype.__realPause = HTMLMediaElement.prototype.pause;
+                HTMLMediaElement.prototype.pause = function() {
+                    if (window.__isUserPause) {
+                        return this.__realPause.apply(this, arguments);
+                    }
+                    // Block OS / WebKit minimize pause! Zero jeda!
+                    return;
+                };
+            }
 
             function swallow(event) {
                 event.stopImmediatePropagation();
@@ -117,8 +144,9 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             self?.endBackgroundTask()
         }
         
-        Task { [weak self] in
-            for _ in 0..<15 {
+        backgroundResumeTask?.cancel()
+        backgroundResumeTask = Task { [weak self] in
+            for _ in 0..<12 {
                 guard let self = self, AudioPlayerManager.shared.isPlaying else { break }
                 _ = try? await self.webView?.evaluateJavaScript("""
                 if (typeof player !== 'undefined' && player.playVideo) {
@@ -156,7 +184,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
           var player;
-          var userWantsPause = false;
+          var userRequestedPause = false;
 
           function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
@@ -183,7 +211,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerReady(event) {
-            userWantsPause = false;
+            userRequestedPause = false;
             event.target.playVideo();
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "ready",
@@ -201,8 +229,8 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerStateChange(event) {
-            // Anti-Pause on tab switch / minimize: If user didn't ask to pause, resume immediately and don't notify Swift
-            if (event.data === 2 && !userWantsPause) {
+            // Anti-spurious pause: only report pause to Swift if user actually requested it
+            if (event.data === 2 && !userRequestedPause) {
               if (player && player.playVideo) {
                 player.playVideo();
               }
@@ -221,18 +249,29 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             });
           }
 
+          window.broadcastPauseState = function(isPause) {
+            userRequestedPause = isPause;
+            window.__isUserPause = isPause;
+            var iframes = document.querySelectorAll('iframe');
+            for (var i = 0; i < iframes.length; i++) {
+              try {
+                iframes[i].contentWindow.postMessage(isPause ? 'EMSA_USER_PAUSE' : 'EMSA_USER_PLAY', '*');
+              } catch(e) {}
+            }
+          };
+
           window.userPlay = function() {
-            userWantsPause = false;
+            window.broadcastPauseState(false);
             if (player && player.playVideo) player.playVideo();
           };
 
           window.userPause = function() {
-            userWantsPause = true;
+            window.broadcastPauseState(true);
             if (player && player.pauseVideo) player.pauseVideo();
           };
 
           window.swapTrack = function(newVid, keepSeconds) {
-            userWantsPause = false;
+            window.broadcastPauseState(false);
             if (player && player.loadVideoById) {
               player.loadVideoById({
                 videoId: newVid,
@@ -249,10 +288,15 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     
     func play() {
+        backgroundResumeTask?.cancel()
+        backgroundResumeTask = nil
         webView?.evaluateJavaScript("if (typeof window.userPlay !== 'undefined') { window.userPlay(); } else if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }", completionHandler: nil)
     }
     
     func pause() {
+        backgroundResumeTask?.cancel()
+        backgroundResumeTask = nil
+        endBackgroundTask()
         webView?.evaluateJavaScript("if (typeof window.userPause !== 'undefined') { window.userPause(); } else if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }", completionHandler: nil)
     }
     
