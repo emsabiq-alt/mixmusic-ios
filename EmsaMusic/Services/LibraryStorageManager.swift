@@ -100,14 +100,45 @@ class LibraryStorageManager: ObservableObject {
         savePlaylists()
     }
     
+    func deletePlaylist(playlistId: UUID) {
+        customPlaylists.removeAll { $0.id == playlistId }
+        savePlaylists()
+    }
+    
+    func renamePlaylist(playlistId: UUID, newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let index = customPlaylists.firstIndex(where: { $0.id == playlistId }) else { return }
+        customPlaylists[index].title = trimmed
+        savePlaylists()
+    }
+    
     // Import Playlist from Spotify or YouTube URL
     func importPlaylistFromLink(link: String) async -> Bool {
         let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return false }
         
+        // 1. If it's a Spotify Playlist Link, fetch actual metadata & tracklist from Spotify Embed
+        if clean.contains("spotify.com/playlist/") {
+            if let playlistId = clean.components(separatedBy: "playlist/").last?.components(separatedBy: "?").first, !playlistId.isEmpty {
+                if let (title, tracks) = await fetchSpotifyEmbedPlaylist(id: playlistId), !tracks.isEmpty {
+                    await MainActor.run {
+                        let imported = Playlist(
+                            title: title,
+                            description: "Diimpor dari Spotify Playlist",
+                            tracks: tracks
+                        )
+                        self.customPlaylists.insert(imported, at: 0)
+                        self.savePlaylists()
+                    }
+                    return true
+                }
+            }
+        }
+        
+        // 2. Generic Search Fallback (without 30 cap)
         var query = clean
         if clean.contains("spotify.com") {
-            query = "Spotify Playlist Hits 2026"
+            query = "Spotify Hits"
         } else if clean.contains("youtube.com") || clean.contains("youtu.be") {
             query = "Top Music Hits"
         }
@@ -119,7 +150,7 @@ class LibraryStorageManager: ObservableObject {
                     let imported = Playlist(
                         title: "Impor: \(query)",
                         description: "Diimpor dari \(clean)",
-                        tracks: Array(tracks.prefix(30))
+                        tracks: tracks
                     )
                     self.customPlaylists.insert(imported, at: 0)
                     self.savePlaylists()
@@ -130,6 +161,51 @@ class LibraryStorageManager: ObservableObject {
             return false
         }
         return false
+    }
+    
+    private func fetchSpotifyEmbedPlaylist(id: String) async -> (String, [Track])? {
+        guard let url = URL(string: "https://open.spotify.com/embed/playlist/\(id)") else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)", forHTTPHeaderField: "User-Agent")
+        
+        guard let (data, resp) = try? await URLSession.shared.data(for: request),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let html = String(data: data, encoding: .utf8) else { return nil }
+        
+        // Extract __NEXT_DATA__ JSON script
+        guard let startTag = html.range(of: "<script id=\"__NEXT_DATA__\" type=\"application/json\">"),
+              let endTag = html.range(of: "</script>", range: startTag.upperBound..<html.endIndex) else { return nil }
+        
+        let jsonStr = String(html[startTag.upperBound..<endTag.lowerBound])
+        guard let jsonData = jsonStr.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let props = json["props"] as? [String: Any],
+              let pageProps = props["pageProps"] as? [String: Any],
+              let state = pageProps["state"] as? [String: Any],
+              let dataObj = state["data"] as? [String: Any],
+              let entity = dataObj["entity"] as? [String: Any] else { return nil }
+        
+        let playlistTitle = entity["title"] as? String ?? "Spotify Playlist"
+        let trackList = entity["trackList"] as? [[String: Any]] ?? []
+        
+        var result: [Track] = []
+        for item in trackList {
+            guard let trackTitle = item["title"] as? String else { continue }
+            let artist = item["subtitle"] as? String ?? "Various Artists"
+            let durationMs = item["duration"] as? Int ?? 0
+            let uri = item["uri"] as? String ?? ""
+            let id = uri.components(separatedBy: ":").last ?? UUID().uuidString
+            
+            result.append(Track(
+                id: "sp:\(id)",
+                title: trackTitle,
+                artist: artist,
+                thumbnailUrl: "",
+                durationSeconds: durationMs > 0 ? durationMs / 1000 : nil
+            ))
+        }
+        
+        return (playlistTitle, result)
     }
     
     private func saveLiked() {

@@ -1,12 +1,16 @@
 import SwiftUI
 
 struct PlaylistDetailView: View {
+    @Environment(\.presentationMode) var presentationMode
     @ObservedObject var player = AudioPlayerManager.shared
     @ObservedObject var library = LibraryStorageManager.shared
     
     let title: String
     let tracks: [Track]
     var playlistId: UUID? = nil
+    
+    @State private var showRenameDialog: Bool = false
+    @State private var renameText: String = ""
     
     var body: some View {
         VStack(spacing: 0) {
@@ -134,5 +138,67 @@ struct PlaylistDetailView: View {
         }
         .background(Color(hex: "090A0F").ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let pId = playlistId {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button(action: {
+                            renameText = title
+                            showRenameDialog = true
+                        }) {
+                            Label("Ubah Nama", systemImage: "pencil")
+                        }
+                        Button(role: .destructive, action: {
+                            library.deletePlaylist(playlistId: pId)
+                            presentationMode.wrappedValue.dismiss()
+                        }) {
+                            Label("Hapus Playlist", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 18))
+                            .foregroundColor(.white)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showRenameDialog) {
+            NavigationView {
+                VStack(spacing: 20) {
+                    TextField("Nama playlist baru...", text: $renameText)
+                        .padding(14)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(12)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 24)
+                    
+                    Button(action: {
+                        if let pId = playlistId {
+                            library.renamePlaylist(playlistId: pId, newTitle: renameText)
+                        }
+                        showRenameDialog = false
+                    }) {
+                        Text("Simpan Perubahan")
+                            .font(.headline)
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color(hex: "1DB954"))
+                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
+                    }
+                    Spacer()
+                }
+                .background(Color(hex: "121212").ignoresSafeArea())
+                .navigationTitle("Ubah Nama Playlist")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Batal") { showRenameDialog = false }
+                    }
+                }
+            }
+        }
     }
 }

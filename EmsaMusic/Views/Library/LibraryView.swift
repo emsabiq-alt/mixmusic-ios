@@ -7,6 +7,8 @@ struct LibraryView: View {
     
     @State private var showCreatePlaylistSheet: Bool = false
     @State private var showImportLinkSheet: Bool = false
+    @State private var playlistToRename: Playlist? = nil
+    @State private var renamePlaylistTitle: String = ""
     @State private var newPlaylistTitle: String = ""
     @State private var importLinkUrl: String = ""
     @State private var isImporting: Bool = false
@@ -269,12 +271,45 @@ struct LibraryView: View {
                                                 .foregroundColor(Color(hex: "B3B3B3"))
                                         }
                                         Spacer()
+                                        
+                                        Menu {
+                                            Button(action: {
+                                                renamePlaylistTitle = playlist.title
+                                                playlistToRename = playlist
+                                            }) {
+                                                Label("Ubah Nama", systemImage: "pencil")
+                                            }
+                                            Button(role: .destructive, action: {
+                                                library.deletePlaylist(playlistId: playlist.id)
+                                            }) {
+                                                Label("Hapus Playlist", systemImage: "trash")
+                                            }
+                                        } label: {
+                                            Image(systemName: "ellipsis")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(Color(hex: "777777"))
+                                                .frame(width: 32, height: 32)
+                                        }
+                                        
                                         Image(systemName: "chevron.right")
                                             .font(.caption)
-                                            .foregroundColor(Color(hex: "777777"))
+                                            .foregroundColor(Color(hex: "555555"))
                                     }
                                     .padding(.horizontal, 20)
                                     .padding(.vertical, 6)
+                                }
+                                .contextMenu {
+                                    Button(action: {
+                                        renamePlaylistTitle = playlist.title
+                                        playlistToRename = playlist
+                                    }) {
+                                        Label("Ubah Nama", systemImage: "pencil")
+                                    }
+                                    Button(role: .destructive, action: {
+                                        library.deletePlaylist(playlistId: playlist.id)
+                                    }) {
+                                        Label("Hapus Playlist", systemImage: "trash")
+                                    }
                                 }
                             }
                         }
@@ -378,6 +413,42 @@ struct LibraryView: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Batal") { showImportLinkSheet = false }
+                    }
+                }
+            }
+        }
+        .sheet(item: $playlistToRename) { p in
+            NavigationView {
+                VStack(spacing: 20) {
+                    TextField("Nama playlist baru...", text: $renamePlaylistTitle)
+                        .padding(14)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(12)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 24)
+                    
+                    Button(action: {
+                        library.renamePlaylist(playlistId: p.id, newTitle: renamePlaylistTitle)
+                        playlistToRename = nil
+                    }) {
+                        Text("Simpan Perubahan")
+                            .font(.headline)
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(spotifyGreen)
+                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
+                    }
+                    Spacer()
+                }
+                .background(Color(hex: "121212").ignoresSafeArea())
+                .navigationTitle("Ubah Nama Playlist")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Batal") { playlistToRename = nil }
                     }
                 }
             }

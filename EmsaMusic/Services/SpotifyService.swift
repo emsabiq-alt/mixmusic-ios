@@ -219,6 +219,40 @@ class SpotifyService: NSObject, ObservableObject {
         }
     }
     
+    func fetchPlaylistTracks(playlistId: String) async -> [Track] {
+        guard let token = accessToken, let url = URL(string: "https://api.spotify.com/v1/playlists/\(playlistId)/tracks?limit=100") else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = json["items"] as? [[String: Any]] else { return [] }
+        
+        var parsed: [Track] = []
+        for item in items {
+            guard let t = item["track"] as? [String: Any],
+                  let id = t["id"] as? String,
+                  let name = t["name"] as? String else { continue }
+            
+            var artistName = "Various Artists"
+            if let artists = t["artists"] as? [[String: Any]], let first = artists.first?["name"] as? String {
+                artistName = first
+            }
+            
+            var thumb = ""
+            if let album = t["album"] as? [String: Any],
+               let images = album["images"] as? [[String: Any]],
+               let firstImg = images.first?["url"] as? String {
+                thumb = firstImg
+            }
+            
+            let durationMs = t["duration_ms"] as? Int ?? 0
+            parsed.append(Track(id: "sp:\(id)", title: name, artist: artistName, thumbnailUrl: thumb, durationSeconds: durationMs / 1000))
+        }
+        return parsed
+    }
+    
     // MARK: - PKCE Helpers
     private func generateCodeVerifier() -> String {
         var bytes = [UInt8](repeating: 0, count: 64)
