@@ -1,5 +1,10 @@
 import Foundation
 
+struct LyricsPackage {
+    let lines: [LyricLine]
+    let officialDuration: TimeInterval?
+}
+
 class LyricsService {
     static let shared = LyricsService()
     private let session = URLSession.shared
@@ -34,31 +39,31 @@ class LyricsService {
     }
     
     // Fetch synced lyrics from LRCLIB with multi-tier search
-    func fetchLyrics(title: String, artist: String, duration: TimeInterval? = nil) async -> [LyricLine] {
+    func fetchLyrics(title: String, artist: String, duration: TimeInterval? = nil) async -> LyricsPackage {
         let cleanedTitle = cleanTitle(title)
         let cleanedArtist = cleanArtist(artist)
         
         // 1. Exact get API
-        if let lines = await fetchFromGetEndpoint(title: cleanedTitle, artist: cleanedArtist, duration: duration), !lines.isEmpty {
-            return lines
+        if let pkg = await fetchFromGetEndpoint(title: cleanedTitle, artist: cleanedArtist, duration: duration), !pkg.lines.isEmpty {
+            return pkg
         }
         
         // 2. Search fallback API (fuzzy matching)
-        if let lines = await fetchFromSearchEndpoint(title: cleanedTitle, artist: cleanedArtist), !lines.isEmpty {
-            return lines
+        if let pkg = await fetchFromSearchEndpoint(title: cleanedTitle, artist: cleanedArtist), !pkg.lines.isEmpty {
+            return pkg
         }
         
         // 3. Fallback with original raw title
         if cleanedTitle != title {
-            if let lines = await fetchFromGetEndpoint(title: title, artist: artist, duration: duration), !lines.isEmpty {
-                return lines
+            if let pkg = await fetchFromGetEndpoint(title: title, artist: artist, duration: duration), !pkg.lines.isEmpty {
+                return pkg
             }
         }
         
-        return []
+        return LyricsPackage(lines: [], officialDuration: nil)
     }
     
-    private func fetchFromGetEndpoint(title: String, artist: String, duration: TimeInterval?) async -> [LyricLine]? {
+    private func fetchFromGetEndpoint(title: String, artist: String, duration: TimeInterval?) async -> LyricsPackage? {
         guard let encodedTitle = title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let encodedArtist = artist.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return nil
@@ -82,10 +87,16 @@ class LyricsService {
             }
             
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            let officialDuration = json["duration"] as? Double
+            
             if let synced = json["syncedLyrics"] as? String, !synced.isEmpty {
-                return parseLRC(synced)
+                let lines = parseLRC(synced)
+                let lastLyricTime = lines.last?.time
+                let duration = officialDuration ?? (lastLyricTime != nil ? lastLyricTime! + 5.0 : nil)
+                return LyricsPackage(lines: lines, officialDuration: duration)
             } else if let plain = json["plainLyrics"] as? String, !plain.isEmpty {
-                return plain.components(separatedBy: "\n").map { LyricLine(time: 0, text: $0) }
+                let lines = plain.components(separatedBy: "\n").map { LyricLine(time: 0, text: $0) }
+                return LyricsPackage(lines: lines, officialDuration: officialDuration)
             }
         } catch {
             return nil
@@ -93,7 +104,7 @@ class LyricsService {
         return nil
     }
     
-    private func fetchFromSearchEndpoint(title: String, artist: String) async -> [LyricLine]? {
+    private func fetchFromSearchEndpoint(title: String, artist: String) async -> LyricsPackage? {
         guard let encodedQuery = "\(title) \(artist)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "https://lrclib.net/api/search?q=\(encodedQuery)") else {
             return nil
@@ -111,8 +122,12 @@ class LyricsService {
             }
             
             for item in list {
+                let officialDuration = item["duration"] as? Double
                 if let synced = item["syncedLyrics"] as? String, !synced.isEmpty {
-                    return parseLRC(synced)
+                    let lines = parseLRC(synced)
+                    let lastLyricTime = lines.last?.time
+                    let duration = officialDuration ?? (lastLyricTime != nil ? lastLyricTime! + 5.0 : nil)
+                    return LyricsPackage(lines: lines, officialDuration: duration)
                 }
             }
         } catch {

@@ -19,6 +19,7 @@ class AudioPlayerManager: ObservableObject {
     @Published var isPlaying: Bool = false
     @Published var currentTime: TimeInterval = 0
     @Published var duration: TimeInterval = 0
+    @Published var officialTrackDuration: TimeInterval? = nil
     @Published var lyrics: [LyricLine] = []
     @Published var currentLyricIndex: Int = 0
     @Published var lyricsOffset: Double = 0.0
@@ -122,15 +123,22 @@ class AudioPlayerManager: ObservableObject {
             }
         }
         
-        // 1. Fetch lyrics async with duration targeting
+        // 1. Fetch lyrics & official studio song duration async
         Task {
-            let fetchedLyrics = await LyricsService.shared.fetchLyrics(
+            let pkg = await LyricsService.shared.fetchLyrics(
                 title: track.title,
                 artist: track.artist,
                 duration: self.duration > 0 ? self.duration : Double(track.durationSeconds ?? 0)
             )
             await MainActor.run {
-                self.lyrics = fetchedLyrics
+                self.lyrics = pkg.lines
+                if let officialDur = pkg.officialDuration, officialDur > 30 {
+                    self.officialTrackDuration = officialDur
+                    // Cut off long video silence: if stream duration exceeds official track by >10s
+                    if self.duration > (officialDur + 10) || self.duration == 0 {
+                        self.duration = officialDur
+                    }
+                }
             }
         }
         
@@ -178,13 +186,15 @@ class AudioPlayerManager: ObservableObject {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
             ]
         ])
-        let playerItem = AVPlayerItem(asset: asset)
+        playerItem.preferredForwardBufferDuration = 1.0
         
         if self.avPlayer == nil {
             self.avPlayer = AVPlayer(playerItem: playerItem)
             self.avPlayer?.actionAtItemEnd = .none
+            self.avPlayer?.automaticallyWaitsToMinimizeStalling = false
         } else {
             self.avPlayer?.replaceCurrentItem(with: playerItem)
+            self.avPlayer?.automaticallyWaitsToMinimizeStalling = false
         }
         
         self.avPlayer?.play()
@@ -196,9 +206,21 @@ class AudioPlayerManager: ObservableObject {
         self.timeObserver = self.avPlayer?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self else { return }
             self.currentTime = time.seconds
+            
             if let dur = self.avPlayer?.currentItem?.duration.seconds, !dur.isNaN && dur > 0 {
-                self.duration = dur
+                if let official = self.officialTrackDuration, official > 30 {
+                    self.duration = official
+                } else if self.duration == 0 {
+                    self.duration = dur
+                }
             }
+            
+            // Auto-advance if we reached the end of the song (cuts off empty outro silence)
+            if self.duration > 0 && self.currentTime >= (self.duration - 0.5) && self.isPlaying {
+                self.handleTrackEnded()
+                return
+            }
+            
             self.onTimeUpdated()
         }
         

@@ -87,8 +87,20 @@ class YouTubeMusicService {
                     thumb = last
                 }
                 
+                var durationSec: Int? = nil
+                if let fixedCols = r["fixedColumns"] as? [[String: Any]],
+                   let col0 = fixedCols.first?["musicResponsiveListItemFixedColumnRenderer"] as? [String: Any],
+                   let textObj = col0["text"] as? [String: Any],
+                   let timeStr = (textObj["runs"] as? [[String: Any]])?.first?["text"] as? String,
+                   timeStr.contains(":") {
+                    let parts = timeStr.components(separatedBy: ":")
+                    if parts.count == 2, let m = Int(parts[0]), let s = Int(parts[1]) {
+                        durationSec = (m * 60) + s
+                    }
+                }
+                
                 if let id = videoId, !id.isEmpty && !titleStr.isEmpty {
-                    chartTracks.append(Track(id: id, title: titleStr, artist: artistStr, thumbnailUrl: thumb, durationSeconds: nil))
+                    chartTracks.append(Track(id: id, title: titleStr, artist: artistStr, thumbnailUrl: thumb, durationSeconds: durationSec))
                 }
                 
                 if chartTracks.count >= 50 { break }
@@ -357,12 +369,19 @@ class YouTubeMusicService {
         return vis
     }
     
+    func prewarmVisitorData() {
+        Task {
+            _ = await fetchVisitorDataIfNeeded()
+        }
+    }
+    
     func resolveStreamURL(videoId: String) async -> URL? {
         let visitorData = await fetchVisitorDataIfNeeded() ?? ""
         
         guard let url = URL(string: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false") else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
+        req.timeoutInterval = 2.5
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(visionAgent, forHTTPHeaderField: "User-Agent")
         req.setValue("101", forHTTPHeaderField: "X-YouTube-Client-Name")

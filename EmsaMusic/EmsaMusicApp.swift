@@ -11,6 +11,9 @@ struct EmsaMusicApp: App {
         } catch {
             print("[EmsaMusicApp] Failed to set background audio category: \(error)")
         }
+        
+        // Pre-warm YouTube session cache for instant zero-lag playback
+        YouTubeMusicService.shared.prewarmVisitorData()
     }
     
     var body: some Scene {
