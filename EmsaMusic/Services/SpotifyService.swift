@@ -72,7 +72,7 @@ class SpotifyService: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         guard let encodedScopes = scopes.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let encodedRedirect = redirectUri.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
         
-        let authUrlStr = "https://accounts.spotify.com/authorize?client_id=\(clientId)&response_type=code&redirect_uri=\(encodedRedirect)&code_challenge_method=S256&code_challenge=\(codeChallenge)&scope=\(encodedScopes)"
+        let authUrlStr = "https://accounts.spotify.com/authorize?client_id=\(clientId)&response_type=code&redirect_uri=\(encodedRedirect)&code_challenge_method=S256&code_challenge=\(codeChallenge)&scope=\(encodedScopes)&show_dialog=true"
         
         guard let authUrl = URL(string: authUrlStr) else { return }
         
@@ -91,7 +91,7 @@ class SpotifyService: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         }
         
         session.presentationContextProvider = self
-        session.prefersEphemeralWebBrowserSession = false
+        session.prefersEphemeralWebBrowserSession = true
         session.start()
     }
     
