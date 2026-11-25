@@ -25,6 +25,7 @@
 		AA0100100000000100000001 /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0200100000000100000001 /* LyricsView.swift */; };
 		AA0100110000000100000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0200110000000100000001 /* SettingsView.swift */; };
 		AA0100120000000100000001 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0200120000000100000001 /* MainTabView.swift */; };
+		AA0100200000000100000001 /* SpotifyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0200200000000100000001 /* SpotifyService.swift */; };
 		AA0100140000000100000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0200140000000100000001 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -50,6 +51,7 @@
 		AA0200120000000100000001 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/MainTabView.swift"; sourceTree = "<group>"; };
 		AA0200130000000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Resources/Info.plist"; sourceTree = "<group>"; };
 		AA0200140000000100000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Resources/Assets.xcassets"; sourceTree = "<group>"; };
+		AA0200200000000100000001 /* SpotifyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/SpotifyService.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +96,7 @@
 				AA0200120000000100000001 /* MainTabView.swift */,
 				AA0200130000000100000001 /* Info.plist */,
 				AA0200140000000100000001 /* Assets.xcassets */,
+				AA0200200000000100000001 /* SpotifyService.swift */,
 			);
 			path = EmsaMusic;
 			sourceTree = "<group>";
@@ -192,6 +195,7 @@
 				AA0100100000000100000001 /* LyricsView.swift in Sources */,
 				AA0100110000000100000001 /* SettingsView.swift in Sources */,
 				AA0100120000000100000001 /* MainTabView.swift in Sources */,
+				AA0100200000000100000001 /* SpotifyService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

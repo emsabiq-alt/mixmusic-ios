@@ -142,16 +142,23 @@ class AudioPlayerManager: ObservableObject {
             }
         }
         
-        // 2. Resolve Stream URL & Start Native AVPlayer (Spotify Architecture)
+        // 2. Resolve Stream URL (with Spotify hybrid bridge) & Start Native AVPlayer
         Task {
-            if let streamUrl = await YouTubeMusicService.shared.resolveStreamURL(videoId: track.id) {
+            var actualVideoId = track.id
+            if track.id.hasPrefix("sp:") {
+                if let found = try? await YouTubeMusicService.shared.search(query: "\(track.title) \(track.artist)"), let first = found.first {
+                    actualVideoId = first.id
+                }
+            }
+            
+            if let streamUrl = await YouTubeMusicService.shared.resolveStreamURL(videoId: actualVideoId) {
                 await MainActor.run {
                     self.startNativePlayback(url: streamUrl, track: track)
                 }
             } else {
                 // Fallback to WebKit bridge if Google limits direct resolution
                 await MainActor.run {
-                    YouTubeAudioBridge.shared.loadVideo(videoId: track.id)
+                    YouTubeAudioBridge.shared.loadVideo(videoId: actualVideoId)
                 }
             }
         }

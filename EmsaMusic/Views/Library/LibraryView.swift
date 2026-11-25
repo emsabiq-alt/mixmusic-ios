@@ -3,6 +3,7 @@ import SwiftUI
 struct LibraryView: View {
     @ObservedObject var library = LibraryStorageManager.shared
     @ObservedObject var player = AudioPlayerManager.shared
+    @ObservedObject var spotify = SpotifyService.shared
     
     @State private var showCreatePlaylistSheet: Bool = false
     @State private var showImportLinkSheet: Bool = false
@@ -37,6 +38,100 @@ struct LibraryView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
+                    
+                    // Spotify Integration Card
+                    if spotify.isLoggedIn {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 14) {
+                                if let imgUrl = spotify.userProfile?.images?.first?.url, let url = URL(string: imgUrl) {
+                                    AsyncImage(url: url) { img in
+                                        img.resizable().scaledToFill().frame(width: 46, height: 46).clipShape(Circle())
+                                    } placeholder: {
+                                        Circle().fill(Color(hex: "333333")).frame(width: 46, height: 46)
+                                    }
+                                } else {
+                                    Image(systemName: "person.crop.circle.fill")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(spotifyGreen)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(spotify.userProfile?.display_name ?? "Akun Spotify")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                    Text("Spotify Premium Terhubung")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(spotifyGreen)
+                                }
+                                
+                                Spacer()
+                                
+                                Button(action: { spotify.logout() }) {
+                                    Text("Keluar")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(Color.white.opacity(0.1))
+                                        .cornerRadius(8)
+                                }
+                            }
+                            
+                            // Spotify Liked Songs shortcut
+                            NavigationLink(destination: PlaylistDetailView(title: "Spotify Liked Songs", tracks: spotify.likedTracks)) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "heart.circle.fill")
+                                        .font(.title3)
+                                        .foregroundColor(spotifyGreen)
+                                    Text("Lagu Disukai Spotify (\(spotify.likedTracks.count))")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundColor(.white.opacity(0.4))
+                                }
+                                .padding(10)
+                                .background(Color.white.opacity(0.06))
+                                .cornerRadius(10)
+                            }
+                        }
+                        .padding(14)
+                        .background(Color(hex: "1F1F1F"))
+                        .cornerRadius(14)
+                        .padding(.horizontal, 20)
+                    } else {
+                        Button(action: { spotify.startLogin() }) {
+                            HStack(spacing: 14) {
+                                Image(systemName: "waveform.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(spotifyGreen)
+                                
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Hubungkan Spotify Premium")
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundColor(.white)
+                                    Text("Akses seluruh playlist & lagu favoritmu")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.white.opacity(0.6))
+                                }
+                                
+                                Spacer()
+                                
+                                Text("Masuk")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 7)
+                                    .background(spotifyGreen)
+                                    .cornerRadius(20)
+                            }
+                            .padding(14)
+                            .background(Color(hex: "1F1F1F"))
+                            .cornerRadius(14)
+                            .padding(.horizontal, 20)
+                        }
+                    }
                     
                     // 1. Musik Diunduh (Offline Mode)
                     NavigationLink(destination: PlaylistDetailView(title: "Musik Diunduh (Offline)", tracks: library.downloadedTracks)) {

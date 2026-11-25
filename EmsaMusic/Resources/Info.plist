@@ -46,5 +46,16 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>emsamusic</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>com.emsabiq.EmsaMusic</string>
+		</dict>
+	</array>
 </dict>
 </plist>
