@@ -42,7 +42,7 @@ class AudioPlayerManager: ObservableObject {
     
     private func setupAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [.allowBluetooth, .allowAirPlay])
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("Failed to set audio session category: \(error)")
@@ -134,13 +134,18 @@ class AudioPlayerManager: ObservableObject {
             }
         }
         
-        // 2. Play Audio immediately via YouTubeAudioBridge (zero-latency, unmuted)
-        Task { @MainActor in
-            if let player = self.avPlayer {
-                player.pause()
-                self.avPlayer = nil
+        // 2. Resolve Stream URL & Start Native AVPlayer (Spotify Architecture)
+        Task {
+            if let streamUrl = await YouTubeMusicService.shared.resolveStreamURL(videoId: track.id) {
+                await MainActor.run {
+                    self.startNativePlayback(url: streamUrl, track: track)
+                }
+            } else {
+                // Fallback to WebKit bridge if Google limits direct resolution
+                await MainActor.run {
+                    YouTubeAudioBridge.shared.loadVideo(videoId: track.id)
+                }
             }
-            YouTubeAudioBridge.shared.loadVideo(videoId: track.id)
         }
         
         // Artwork for lockscreen
@@ -303,8 +308,19 @@ class AudioPlayerManager: ObservableObject {
     
     private func swapToInstrumental(videoId: String) {
         let time = self.currentTime
-        Task { @MainActor in
-            YouTubeAudioBridge.shared.swapToInstrumental(videoId: videoId, atTime: time)
+        Task {
+            if let streamUrl = await YouTubeMusicService.shared.resolveStreamURL(videoId: videoId) {
+                await MainActor.run {
+                    if let cur = self.currentTrack {
+                        self.startNativePlayback(url: streamUrl, track: cur)
+                        self.seek(to: time)
+                    }
+                }
+            } else {
+                await MainActor.run {
+                    YouTubeAudioBridge.shared.swapToInstrumental(videoId: videoId, atTime: time)
+                }
+            }
         }
     }
     
@@ -321,15 +337,33 @@ class AudioPlayerManager: ObservableObject {
     }
     
     func playNext() {
-        guard !queue.isEmpty else { return }
-        let next = queue.removeFirst()
-        play(track: next, fromQueue: originalQueue)
+        if !queue.isEmpty {
+            let next = queue.removeFirst()
+            play(track: next, fromQueue: originalQueue)
+            return
+        }
+        // If queue is exhausted, loop seamlessly through original playlist
+        if !originalQueue.isEmpty, let cur = currentTrack, let idx = originalQueue.firstIndex(where: { $0.id == cur.id }) {
+            let nextIdx = (idx + 1) % originalQueue.count
+            let next = originalQueue[nextIdx]
+            play(track: next, fromQueue: originalQueue)
+            return
+        }
+        if let first = originalQueue.first {
+            play(track: first, fromQueue: originalQueue)
+        }
     }
     
     func playPrevious() {
         if currentTime > 3.0 {
             seek(to: 0)
             resume()
+            return
+        }
+        if !originalQueue.isEmpty, let cur = currentTrack, let idx = originalQueue.firstIndex(where: { $0.id == cur.id }) {
+            let prevIdx = idx > 0 ? idx - 1 : originalQueue.count - 1
+            let prev = originalQueue[prevIdx]
+            play(track: prev, fromQueue: originalQueue)
         } else {
             seek(to: 0)
             resume()
