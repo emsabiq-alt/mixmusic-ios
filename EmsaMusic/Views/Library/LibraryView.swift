@@ -382,5 +382,13 @@ struct LibraryView: View {
                 }
             }
         }
+        .sheet(isPresented: Binding(
+            get: { spotify.activeLoginUrl != nil },
+            set: { if !$0 { spotify.cancelLogin() } }
+        )) {
+            if let url = spotify.activeLoginUrl {
+                SpotifyLoginSheetView(authUrl: url)
+            }
+        }
     }
 }
