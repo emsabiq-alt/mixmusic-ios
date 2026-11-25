@@ -19,8 +19,8 @@ jobs:
       - name: Build App Bundle (Unsigned)
         run: |
           xcodebuild clean build \
-            -project MixMusic.xcodeproj \
-            -scheme MixMusic \
+            -project EmsaMusic.xcodeproj \
+            -scheme EmsaMusic \
             -configuration Release \
             -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO \
@@ -34,19 +34,19 @@ jobs:
           # Copy compiled .app bundle into Payload directory
           cp -r build/Release-iphoneos/*.app Payload/
           # Create zip archive renamed to .ipa
-          zip -r -9 MixMusic-iOS.ipa Payload
+          zip -r -9 EmsaMusic-iOS.ipa Payload
           rm -rf Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MixMusic-iOS
-          path: MixMusic-iOS.ipa
+          name: EmsaMusic-iOS
+          path: EmsaMusic-iOS.ipa
           retention-days: 14
 
       - name: Create GitHub Release (On Tag)
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: MixMusic-iOS.ipa
+          files: EmsaMusic-iOS.ipa
           generate_release_notes: true

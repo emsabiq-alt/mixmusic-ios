@@ -14,7 +14,7 @@ class LyricsService {
         
         do {
             var request = URLRequest(url: url)
-            request.setValue("MixMusic iOS App (https://github.com/fzn0x/mixmusic)", forHTTPHeaderField: "User-Agent")
+            request.setValue("EmsaMusic iOS App (https://github.com/emsabiq-alt/mixmusic-ios)", forHTTPHeaderField: "User-Agent")
             
             let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
@@ -23,7 +23,6 @@ class LyricsService {
             
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let syncedLyrics = json["syncedLyrics"] as? String else {
-                // If plain lyrics exist
                 if let plain = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["plainLyrics"] as? String {
                     return plain.components(separatedBy: "\n").map { LyricLine(time: 0, text: $0) }
                 }
@@ -37,7 +36,6 @@ class LyricsService {
         }
     }
     
-    // Parse LRC format: [mm:ss.xx] line
     private func parseLRC(_ lrc: String) -> [LyricLine] {
         var lines: [LyricLine] = []
         let rawLines = lrc.components(separatedBy: "\n")

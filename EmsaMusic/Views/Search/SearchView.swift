@@ -1,36 +1,29 @@
 import SwiftUI
 
-struct ContentView: View {
-    @StateObject private var player = AudioPlayerManager.shared
+struct SearchView: View {
+    @ObservedObject var player = AudioPlayerManager.shared
     @State private var query: String = ""
     @State private var searchResults: [Track] = []
     @State private var isSearching: Bool = false
-    @State private var showNowPlayingSheet: Bool = false
+    
+    let quickTags = ["Nadin Amizah", "Bernadya", "Hindia", "Coldplay", "Tulus", "Sal Priadi"]
     
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Color(hex: "090A0F").ignoresSafeArea()
-            
+        NavigationView {
             VStack(spacing: 0) {
-                // Top Header & Search Bar
+                // Header & Search Bar
                 VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Image(systemName: "music.note.house.fill")
-                            .font(.title2)
-                            .foregroundColor(.cyan)
-                        Text("MixMusic")
-                            .font(.system(size: 28, weight: .black, design: .rounded))
-                            .foregroundColor(.white)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
+                    Text("Pencarian")
+                        .font(.system(size: 28, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 10)
                     
                     // Search Field
                     HStack {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.secondary)
-                        TextField("Cari lagu, artis, atau album...", text: $query)
+                        TextField("Cari lagu, artis, atau lirik...", text: $query)
                             .foregroundColor(.white)
                             .autocapitalization(.none)
                             .disableAutocorrection(true)
@@ -48,16 +41,37 @@ struct ContentView: View {
                     .background(Color.white.opacity(0.08))
                     .cornerRadius(14)
                     .padding(.horizontal, 20)
+                    
+                    // Quick Tags
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(quickTags, id: \.self) { tag in
+                                Text(tag)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.white.opacity(0.08))
+                                    .cornerRadius(20)
+                                    .foregroundColor(.white.opacity(0.85))
+                                    .onTapGesture {
+                                        query = tag
+                                        performSearch()
+                                    }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, 14)
                 
-                // Content List
+                // Content
                 if isSearching {
                     Spacer()
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
-                        .scaleEffect(1.3)
-                    Text("Mencari lagu di YouTube Music & Spotify...")
+                        .scaleEffect(1.2)
+                    Text("Mencari di YouTube Music...")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.top, 12)
@@ -65,13 +79,13 @@ struct ContentView: View {
                 } else if searchResults.isEmpty {
                     Spacer()
                     VStack(spacing: 12) {
-                        Image(systemName: "music.quarternote.3")
-                            .font(.system(size: 48))
-                            .foregroundColor(.cyan.opacity(0.6))
-                        Text("Mulai dengarkan musik")
+                        Image(systemName: "music.note.magnifyingglass")
+                            .font(.system(size: 46))
+                            .foregroundColor(.white.opacity(0.3))
+                        Text("Temukan Musik Tanpa Batas")
                             .font(.headline)
                             .foregroundColor(.white)
-                        Text("Ketik lagu favoritmu di kolom pencarian di atas.")
+                        Text("Ketik judul lagu atau nama penyanyi di atas untuk mulai memutar.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -83,14 +97,9 @@ struct ContentView: View {
                         ForEach(searchResults) { track in
                             HStack(spacing: 14) {
                                 AsyncImage(url: URL(string: track.thumbnailUrl)) { img in
-                                    img.resizable()
-                                       .scaledToFill()
-                                       .frame(width: 52, height: 52)
-                                       .cornerRadius(8)
+                                    img.resizable().scaledToFill().frame(width: 52, height: 52).cornerRadius(8)
                                 } placeholder: {
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.gray.opacity(0.2))
-                                        .frame(width: 52, height: 52)
+                                    RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.2)).frame(width: 52, height: 52)
                                 }
                                 
                                 VStack(alignment: .leading, spacing: 3) {
@@ -116,71 +125,17 @@ struct ContentView: View {
                             }
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                player.play(track: track)
+                                player.play(track: track, fromQueue: searchResults)
                             }
                             .listRowBackground(Color.clear)
                         }
                     }
                     .listStyle(PlainListStyle())
-                    .padding(.bottom, player.currentTrack != nil ? 75 : 0)
+                    .padding(.bottom, 75)
                 }
             }
-            
-            // Mini Player Bar (Floating above bottom)
-            if let track = player.currentTrack {
-                HStack(spacing: 12) {
-                    AsyncImage(url: URL(string: track.thumbnailUrl)) { img in
-                        img.resizable()
-                           .scaledToFill()
-                           .frame(width: 44, height: 44)
-                           .cornerRadius(6)
-                    } placeholder: {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(width: 44, height: 44)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(track.title)
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        Text(track.artist)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                    
-                    Spacer()
-                    
-                    Button(action: { player.togglePlayPause() }) {
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 40, height: 40)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(hex: "181A22").opacity(0.96))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                        )
-                        .shadow(color: .black.opacity(0.4), radius: 10, y: 5)
-                )
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    showNowPlayingSheet = true
-                }
-            }
-        }
-        .sheet(isPresented: $showNowPlayingSheet) {
-            NowPlayingView(isPresented: $showNowPlayingSheet)
+            .background(Color(hex: "090A0F").ignoresSafeArea())
+            .navigationBarHidden(true)
         }
     }
     
@@ -189,13 +144,12 @@ struct ContentView: View {
         isSearching = true
         Task {
             do {
-                let results = try await YouTubeService.shared.search(query: query)
+                let results = try await YouTubeMusicService.shared.search(query: query)
                 await MainActor.run {
                     self.searchResults = results
                     self.isSearching = false
                 }
             } catch {
-                print("Search error: \(error)")
                 await MainActor.run {
                     self.isSearching = false
                 }

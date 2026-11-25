@@ -1,10 +1,22 @@
 import Foundation
 
-class YouTubeService {
-    static let shared = YouTubeService()
+class YouTubeMusicService {
+    static let shared = YouTubeMusicService()
     private let session = URLSession.shared
     
-    // 1. Search YouTube Music using Innertube API
+    // 1. Trending Songs for Home Page
+    func fetchTrending() async -> [Track] {
+        let trendingQueries = ["Top Hits Indonesia 2026", "Lagu Populer Indonesia", "Global Top 50"]
+        let randomQuery = trendingQueries.randomElement() ?? "Top Hits Indonesia"
+        do {
+            let results = try await search(query: randomQuery)
+            return Array(results.prefix(15))
+        } catch {
+            return []
+        }
+    }
+    
+    // 2. Search YouTube Music using Innertube API
     func search(query: String) async throws -> [Track] {
         guard let url = URL(string: "https://music.youtube.com/youtubei/v1/search?prettyPrint=false") else {
             return []
@@ -27,20 +39,24 @@ class YouTubeService {
                 ]
             ],
             "query": query,
-            "params": "Eg-KAQwIABAAGAAgACgAMABqChAEEAMQCRAFEAo%3D" // Filter to Songs & Videos
+            "params": "Eg-KAQwIABAAGAAgACgAMABqChAEEAMQCRAFEAo%3D"
         ]
         
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return try await fallbackSearch(query: query)
+            }
+            let parsed = parseSearchResults(from: data)
+            return parsed.isEmpty ? try await fallbackSearch(query: query) : parsed
+        } catch {
             return try await fallbackSearch(query: query)
         }
-        
-        return parseSearchResults(from: data)
     }
     
-    // 2. Resolve Audio Stream URL via Innertube Player API
+    // 3. Resolve Direct Stream URL
     func resolveStreamURL(videoId: String) async throws -> URL? {
         guard let url = URL(string: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false") else {
             return nil
@@ -84,7 +100,7 @@ class YouTubeService {
            let streamingData = json["streamingData"] as? [String: Any],
            let adaptiveFormats = streamingData["adaptiveFormats"] as? [[String: Any]] {
             
-            // Prefer audio/mp4 (AAC) or audio/webm (Opus)
+            // Prefer audio streams (AAC / Opus)
             for format in adaptiveFormats {
                 if let mimeType = format["mimeType"] as? String, mimeType.contains("audio"),
                    let urlString = format["url"] as? String,
@@ -97,9 +113,8 @@ class YouTubeService {
         return nil
     }
     
-    // Fallback search parser
+    // Public instance fallback (Invidious / Piped)
     private func fallbackSearch(query: String) async throws -> [Track] {
-        // Piped / Invidious public instance fallback
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "https://pipedapi.kavin.rocks/search?q=\(encoded)&filter=music_songs") else {
             return []
@@ -114,7 +129,7 @@ class YouTubeService {
             guard let rawUrl = item["url"] as? String,
                   let id = rawUrl.components(separatedBy: "=").last,
                   let title = item["title"] as? String else { return nil }
-            let uploader = item["uploaderName"] as? String ?? "Unknown"
+            let uploader = item["uploaderName"] as? String ?? "Various Artists"
             let thumbnail = item["thumbnail"] as? String ?? ""
             let duration = item["duration"] as? Int
             return Track(id: id, title: title, artist: uploader, thumbnailUrl: thumbnail, durationSeconds: duration)
@@ -125,7 +140,6 @@ class YouTubeService {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
         var tracks: [Track] = []
         
-        // Deep traversal of Innertube JSON structure
         func searchNodes(_ obj: Any) {
             if let dict = obj as? [String: Any] {
                 if let renderer = dict["musicResponsiveListItemRenderer"] as? [String: Any] {
@@ -179,7 +193,6 @@ class YouTubeService {
         
         guard let id = videoId else { return nil }
         
-        // Thumbnail
         var thumb = ""
         if let thumbDict = renderer["thumbnail"] as? [String: Any],
            let musicThumb = thumbDict["musicThumbnailRenderer"] as? [String: Any],
