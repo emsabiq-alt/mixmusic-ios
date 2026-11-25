@@ -324,4 +324,84 @@ class YouTubeMusicService {
         
         return resultTracks
     }
+    
+    // Fetch Studio Instrumental / Karaoke Track ID
+    func fetchInstrumentalTrack(title: String, artist: String) async -> String? {
+        let cleanTitle = LyricsService.shared.cleanTitle(title)
+        let cleanArtist = LyricsService.shared.cleanArtist(artist)
+        let query = "\(cleanTitle) \(cleanArtist) instrumental"
+        
+        guard let url = URL(string: "https://music.youtube.com/youtubei/v1/search?prettyPrint=false") else {
+            return nil
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://music.youtube.com/", forHTTPHeaderField: "Referer")
+        request.setValue("https://music.youtube.com", forHTTPHeaderField: "Origin")
+        request.setValue("67", forHTTPHeaderField: "X-YouTube-Client-Name")
+        request.setValue("1.20240501.01.00", forHTTPHeaderField: "X-YouTube-Client-Version")
+        request.setValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        
+        let payload: [String: Any] = [
+            "context": [
+                "client": [
+                    "clientName": "WEB_REMIX",
+                    "clientVersion": "1.20240501.01.00",
+                    "hl": "id",
+                    "gl": "ID"
+                ]
+            ],
+            "query": query
+        ]
+        
+        guard let postBody = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+        request.httpBody = postBody
+        
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        
+        guard let contents = json["contents"] as? [String: Any],
+              let tabbed = contents["tabbedSearchResultsRenderer"] as? [String: Any],
+              let tabs = tabbed["tabs"] as? [[String: Any]],
+              let firstTab = tabs.first?["tabRenderer"] as? [String: Any],
+              let content = firstTab["content"] as? [String: Any],
+              let sectionList = content["sectionListRenderer"] as? [String: Any],
+              let sections = sectionList["contents"] as? [[String: Any]] else {
+            return nil
+        }
+        
+        for section in sections {
+            // Check Card Shelf
+            if let card = section["musicCardShelfRenderer"] as? [String: Any] {
+                if let watch = (card["onTap"] as? [String: Any])?["watchEndpoint"] as? [String: Any],
+                   let vid = watch["videoId"] as? String, !vid.isEmpty {
+                    return vid
+                }
+            }
+            
+            // Check List Shelf
+            if let shelf = section["musicShelfRenderer"] as? [String: Any],
+               let items = shelf["contents"] as? [[String: Any]] {
+                for it in items {
+                    if let r = it["musicResponsiveListItemRenderer"] as? [String: Any] {
+                        var videoId = (r["playlistItemData"] as? [String: Any])?["videoId"] as? String
+                        if videoId == nil || videoId?.isEmpty == true {
+                            let nav = r["navigationEndpoint"] as? [String: Any]
+                            videoId = (nav?["watchEndpoint"] as? [String: Any])?["videoId"] as? String
+                        }
+                        if let vid = videoId, !vid.isEmpty {
+                            return vid
+                        }
+                    }
+                }
+            }
+        }
+        
+        return nil
+    }
 }

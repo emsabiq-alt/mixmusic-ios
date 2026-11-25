@@ -25,6 +25,8 @@ class AudioPlayerManager: ObservableObject {
     @Published var sleepTimerOption: SleepTimerOption = .off
     @Published var sleepTimerRemainingSeconds: TimeInterval = 0
     @Published var isKaraokeMode: Bool = false
+    @Published var vocalVolume: Double = 1.0
+    @Published var cachedInstrumentalId: String? = nil
     @Published var equalizerPreset: EqualizerPreset = .flat
     @Published var endlessAutoplay: Bool = true
     
@@ -98,6 +100,19 @@ class AudioPlayerManager: ObservableObject {
                     let nextTracks = Array(fromQueue.suffix(from: fromQueue.index(after: idx)))
                     self.queue = nextTracks
                 }
+            }
+        }
+        
+        // Reset vocal & karaoke
+        self.vocalVolume = 1.0
+        self.isKaraokeMode = false
+        self.cachedInstrumentalId = nil
+        
+        // Preload Studio Instrumental Track ID in background
+        Task {
+            let instId = await YouTubeMusicService.shared.fetchInstrumentalTrack(title: track.title, artist: track.artist)
+            await MainActor.run {
+                self.cachedInstrumentalId = instId
             }
         }
         
@@ -190,22 +205,43 @@ class AudioPlayerManager: ObservableObject {
         }
     }
     
-    func toggleKaraokeMode() {
+    func setVocalVolume(_ newVol: Double) {
+        self.vocalVolume = newVol
         guard let track = currentTrack else { return }
-        isKaraokeMode.toggle()
         
-        if isKaraokeMode {
-            Task {
-                let query = "\(track.title) \(track.artist) karaoke minus one instrumental"
-                if let results = try? await YouTubeMusicService.shared.search(query: query),
-                   let instrumental = results.first {
-                    await MainActor.run {
-                        YouTubeAudioBridge.shared.swapToInstrumental(videoId: instrumental.id, atTime: self.currentTime)
+        if newVol < 0.4 {
+            // Hilangkan vokal -> Beralih ke Studio Instrumental / Minus One
+            if !isKaraokeMode {
+                isKaraokeMode = true
+                if let instId = cachedInstrumentalId {
+                    YouTubeAudioBridge.shared.swapToInstrumental(videoId: instId, atTime: currentTime)
+                } else {
+                    Task {
+                        if let instId = await YouTubeMusicService.shared.fetchInstrumentalTrack(title: track.title, artist: track.artist) {
+                            await MainActor.run {
+                                self.cachedInstrumentalId = instId
+                                if self.isKaraokeMode {
+                                    YouTubeAudioBridge.shared.swapToInstrumental(videoId: instId, atTime: self.currentTime)
+                                }
+                            }
+                        }
                     }
                 }
             }
         } else {
-            YouTubeAudioBridge.shared.swapToInstrumental(videoId: track.id, atTime: self.currentTime)
+            // Kembalikan vokal penuh asli
+            if isKaraokeMode {
+                isKaraokeMode = false
+                YouTubeAudioBridge.shared.swapToInstrumental(videoId: track.id, atTime: currentTime)
+            }
+        }
+    }
+    
+    func toggleKaraokeMode() {
+        if vocalVolume < 0.4 {
+            setVocalVolume(1.0)
+        } else {
+            setVocalVolume(0.0)
         }
     }
     
