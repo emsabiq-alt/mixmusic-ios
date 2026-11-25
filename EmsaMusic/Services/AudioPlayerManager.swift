@@ -37,10 +37,17 @@ class AudioPlayerManager: ObservableObject {
     
     private func setupAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [.allowBluetooth, .allowAirPlay])
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("Failed to set audio session category: \(error)")
+        }
+        
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            if self?.isPlaying == true {
+                YouTubeAudioBridge.shared.play()
+                BackgroundAudioKeeper.shared.start()
+            }
         }
     }
     
@@ -128,7 +135,8 @@ class AudioPlayerManager: ObservableObject {
             }
         }
         
-        // 2. Play via YouTubeAudioBridge
+        // 2. Play via YouTubeAudioBridge & start background keeper
+        BackgroundAudioKeeper.shared.start()
         YouTubeAudioBridge.shared.loadVideo(videoId: track.id)
         updateNowPlaying(track: track, elapsed: 0, duration: duration)
         
@@ -275,6 +283,7 @@ class AudioPlayerManager: ObservableObject {
     
     func pause() {
         YouTubeAudioBridge.shared.pause()
+        BackgroundAudioKeeper.shared.pause()
         isPlaying = false
         if let track = currentTrack {
             updateNowPlaying(track: track, elapsed: currentTime, duration: duration)
@@ -282,6 +291,7 @@ class AudioPlayerManager: ObservableObject {
     }
     
     func resume() {
+        BackgroundAudioKeeper.shared.start()
         YouTubeAudioBridge.shared.play()
         isPlaying = true
         if let track = currentTrack {
@@ -358,5 +368,61 @@ class AudioPlayerManager: ObservableObject {
         }
         
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+}
+
+class BackgroundAudioKeeper {
+    static let shared = BackgroundAudioKeeper()
+    private var silentPlayer: AVAudioPlayer?
+    
+    func start() {
+        if silentPlayer != nil {
+            silentPlayer?.play()
+            return
+        }
+        
+        do {
+            let wavData = generateSilentWav()
+            silentPlayer = try AVAudioPlayer(data: wavData)
+            silentPlayer?.numberOfLoops = -1
+            silentPlayer?.volume = 0.001
+            silentPlayer?.prepareToPlay()
+            silentPlayer?.play()
+        } catch {
+            print("[BackgroundAudioKeeper] Error: \(error)")
+        }
+    }
+    
+    func pause() {
+        silentPlayer?.pause()
+    }
+    
+    private func generateSilentWav() -> Data {
+        let sampleRate: Int32 = 44100
+        let channels: Int16 = 1
+        let bitsPerSample: Int16 = 16
+        let byteRate = sampleRate * Int32(channels) * Int32(bitsPerSample / 8)
+        let blockAlign = channels * (bitsPerSample / 8)
+        let dataSize: Int32 = sampleRate * 2
+        let chunkSize = 36 + dataSize
+        
+        var data = Data()
+        data.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+        data.append(withUnsafeBytes(of: chunkSize.littleEndian) { Data($0) })
+        data.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
+        data.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+        let sub1: Int32 = 16
+        data.append(withUnsafeBytes(of: sub1.littleEndian) { Data($0) })
+        let fmt: Int16 = 1
+        data.append(withUnsafeBytes(of: fmt.littleEndian) { Data($0) })
+        data.append(withUnsafeBytes(of: channels.littleEndian) { Data($0) })
+        data.append(withUnsafeBytes(of: sampleRate.littleEndian) { Data($0) })
+        data.append(withUnsafeBytes(of: byteRate.littleEndian) { Data($0) })
+        data.append(withUnsafeBytes(of: blockAlign.littleEndian) { Data($0) })
+        data.append(withUnsafeBytes(of: bitsPerSample.littleEndian) { Data($0) })
+        data.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+        data.append(withUnsafeBytes(of: dataSize.littleEndian) { Data($0) })
+        data.append(Data(count: Int(dataSize)))
+        return data
     }
 }
