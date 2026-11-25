@@ -18,6 +18,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     
     private func setupWebView() {
         let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences.preferredContentMode = .desktop
         config.allowsInlineMediaPlayback = true
         config.allowsPictureInPictureMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -25,7 +26,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         let contentController = WKUserContentController()
         contentController.add(self, name: "audioBridge")
         
-        // Proven multi-layer background audio script (injected into all frames)
+        // Injected background playback script across all frames
         let backgroundScriptSource = """
         (function () {
             if (window.__bgPlaybackInstalled) { return; }
@@ -33,12 +34,12 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
 
             var hiddenAt = 0;
             var wasPlaying = false;
-            window.isUserPause = false;
 
             function currentVideo() {
                 return document.querySelector('video');
             }
 
+            // Keep document reporting visible
             function define(target, name, value) {
                 try {
                     Object.defineProperty(target, name, { get: function () { return value; }, configurable: true });
@@ -52,19 +53,20 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 Document.prototype.hasFocus = function () { return true; };
             } catch (e) {}
 
+            // Called as app loses focus / transitions to background
             window.__bgCapture = function () {
                 var video = currentVideo();
                 hiddenAt = Date.now();
-                wasPlaying = !window.isUserPause && !!(video && !video.paused && !video.ended);
+                wasPlaying = !!(video && !video.paused && !video.ended);
             };
 
             window.__bgResume = function () {
                 var video = currentVideo();
-                if (video && video.paused && !video.ended && wasPlaying) {
-                    var p = video.play();
-                    if (p && p.catch) { p.catch(function () {}); }
-                }
-                if (typeof player !== 'undefined' && player.playVideo && player.getPlayerState && player.getPlayerState() === 2 && wasPlaying) {
+                if (!video || !wasPlaying || !video.paused || video.ended) { return; }
+                if (Date.now() - hiddenAt > 4000) { return; }
+                var promise = video.play();
+                if (promise && promise.catch) { promise.catch(function () {}); }
+                if (typeof player !== 'undefined' && player.playVideo && player.getPlayerState && player.getPlayerState() === 2) {
                     player.playVideo();
                 }
             };
@@ -73,6 +75,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 event.stopImmediatePropagation();
             }, true);
 
+            // Swallow visibilitychange events so YouTube does not pause on backgrounding
             function swallow(event) {
                 var video = currentVideo();
                 hiddenAt = Date.now();
@@ -86,7 +89,20 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             window.addEventListener('pagehide', function (event) {
                 var video = currentVideo();
                 hiddenAt = Date.now();
-                if (video && !video.paused && !video.ended) { wasPlaying = true; }
+                wasPlaying = !!(video && !video.paused && !video.ended);
+            }, true);
+
+            // Safety net: Only auto-resume if pause happened within 2000ms of app minimize/lock
+            document.addEventListener('pause', function (event) {
+                var video = event.target;
+                if (!video || video.tagName !== 'VIDEO') { return; }
+                if (!wasPlaying || Date.now() - hiddenAt > 2000) { return; }
+                var resume = function () {
+                    var promise = video.play();
+                    if (promise && promise.catch) { promise.catch(function () {}); }
+                };
+                resume();
+                setTimeout(resume, 200);
             }, true);
         })();
         """
@@ -163,7 +179,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
           var player;
-          var userWantsPause = false;
 
           function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
@@ -190,8 +205,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerReady(event) {
-            userWantsPause = false;
-            window.isUserPause = false;
             event.target.playVideo();
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "ready",
@@ -294,6 +307,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                         AudioPlayerManager.shared.isLoading = false
                     } else if state == 2 {
                         AudioPlayerManager.shared.isPlaying = false
+                        AudioPlayerManager.shared.isLoading = false
                     } else if state == 3 {
                         AudioPlayerManager.shared.isLoading = true
                     } else if state == 0 {
