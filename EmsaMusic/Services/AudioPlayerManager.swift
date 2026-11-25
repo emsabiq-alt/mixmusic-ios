@@ -6,8 +6,6 @@ import UIKit
 class AudioPlayerManager: ObservableObject {
     static let shared = AudioPlayerManager()
     
-    private var player: AVPlayer?
-    private var timeObserverToken: Any?
     private var sleepTimer: Timer?
     
     @Published var currentTrack: Track?
@@ -29,25 +27,14 @@ class AudioPlayerManager: ObservableObject {
     init() {
         setupAudioSession()
         setupRemoteCommands()
-        setupPlayerEndObserver()
     }
     
     private func setupAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [.allowBluetooth, .allowAirPlay])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("Failed to set audio session category: \(error)")
-        }
-    }
-    
-    private func setupPlayerEndObserver() {
-        NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handleTrackEnded()
         }
     }
     
@@ -86,12 +73,13 @@ class AudioPlayerManager: ObservableObject {
         }
     }
     
-    // Play track & set up queue
     func play(track: Track, fromQueue: [Track] = []) {
         self.currentTrack = track
         self.isLoading = true
         self.lyrics = []
         self.currentLyricIndex = 0
+        self.currentTime = 0
+        self.duration = Double(track.durationSeconds ?? 0)
         
         LibraryStorageManager.shared.addToHistory(track: track)
         
@@ -109,47 +97,17 @@ class AudioPlayerManager: ObservableObject {
             }
         }
         
+        // 1. Fetch lyrics async
         Task {
-            // 1. Fetch lyrics
             let fetchedLyrics = await LyricsService.shared.fetchLyrics(title: track.title, artist: track.artist)
             await MainActor.run {
                 self.lyrics = fetchedLyrics
             }
-            
-            // 2. Resolve stream URL
-            do {
-                if let streamUrl = try await YouTubeMusicService.shared.resolveStreamURL(videoId: track.id) {
-                    await MainActor.run {
-                        self.startPlayback(url: streamUrl, track: track)
-                    }
-                } else {
-                    await MainActor.run {
-                        self.isLoading = false
-                    }
-                }
-            } catch {
-                print("Stream resolve failed: \(error)")
-                await MainActor.run {
-                    self.isLoading = false
-                }
-            }
-        }
-    }
-    
-    private func startPlayback(url: URL, track: Track) {
-        let item = AVPlayerItem(url: url)
-        if player == nil {
-            player = AVPlayer(playerItem: item)
-        } else {
-            player?.replaceCurrentItem(with: item)
         }
         
-        player?.rate = playbackSpeed
-        self.isPlaying = true
-        self.isLoading = false
-        
-        setupTimeObserver()
-        updateNowPlaying(track: track, elapsed: 0, duration: 0)
+        // 2. Play via YouTubeAudioBridge
+        YouTubeAudioBridge.shared.loadVideo(videoId: track.id)
+        updateNowPlaying(track: track, elapsed: 0, duration: duration)
         
         // Artwork for lockscreen
         if let thumbUrl = URL(string: track.thumbnailUrl) {
@@ -164,24 +122,10 @@ class AudioPlayerManager: ObservableObject {
         }
     }
     
-    private func setupTimeObserver() {
-        if let token = timeObserverToken {
-            player?.removeTimeObserver(token)
-            timeObserverToken = nil
-        }
-        
-        let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
-        timeObserverToken = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self = self else { return }
-            self.currentTime = time.seconds
-            
-            if let currentItem = self.player?.currentItem {
-                let d = currentItem.duration.seconds
-                if !d.isNaN && d > 0 {
-                    self.duration = d
-                }
-            }
-            self.updateCurrentLyricIndex()
+    func onTimeUpdated() {
+        updateCurrentLyricIndex()
+        if let track = currentTrack {
+            updateNowPlaying(track: track, elapsed: currentTime, duration: duration)
         }
     }
     
@@ -197,7 +141,7 @@ class AudioPlayerManager: ObservableObject {
         }
     }
     
-    private func handleTrackEnded() {
+    func handleTrackEnded() {
         if sleepTimerOption == .endOfTrack {
             pause()
             setSleepTimer(option: .off)
@@ -234,7 +178,6 @@ class AudioPlayerManager: ObservableObject {
             seek(to: 0)
             resume()
         } else {
-            // Restart current track or previous in queue
             seek(to: 0)
             resume()
         }
@@ -249,7 +192,7 @@ class AudioPlayerManager: ObservableObject {
     }
     
     func pause() {
-        player?.pause()
+        YouTubeAudioBridge.shared.pause()
         isPlaying = false
         if let track = currentTrack {
             updateNowPlaying(track: track, elapsed: currentTime, duration: duration)
@@ -257,7 +200,7 @@ class AudioPlayerManager: ObservableObject {
     }
     
     func resume() {
-        player?.rate = playbackSpeed
+        YouTubeAudioBridge.shared.play()
         isPlaying = true
         if let track = currentTrack {
             updateNowPlaying(track: track, elapsed: currentTime, duration: duration)
@@ -265,8 +208,7 @@ class AudioPlayerManager: ObservableObject {
     }
     
     func seek(to seconds: TimeInterval) {
-        let cmTime = CMTime(seconds: seconds, preferredTimescale: 600)
-        player?.seek(to: cmTime)
+        YouTubeAudioBridge.shared.seek(to: seconds)
         currentTime = seconds
         if let track = currentTrack {
             updateNowPlaying(track: track, elapsed: seconds, duration: duration)
@@ -294,9 +236,7 @@ class AudioPlayerManager: ObservableObject {
     
     func setPlaybackSpeed(_ speed: Float) {
         self.playbackSpeed = speed
-        if isPlaying {
-            player?.rate = speed
-        }
+        YouTubeAudioBridge.shared.setPlaybackRate(speed)
     }
     
     func setSleepTimer(option: SleepTimerOption) {

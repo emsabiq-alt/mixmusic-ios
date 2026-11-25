@@ -1,0 +1,174 @@
+import Foundation
+import WebKit
+import SwiftUI
+
+class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
+    static let shared = YouTubeAudioBridge()
+    
+    var webView: WKWebView?
+    
+    override init() {
+        super.init()
+        setupWebView()
+    }
+    
+    private func setupWebView() {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        
+        let contentController = WKUserContentController()
+        contentController.add(self, name: "audioBridge")
+        config.userContentController = contentController
+        
+        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 2, height: 2), configuration: config)
+        wv.isOpaque = false
+        wv.backgroundColor = .clear
+        self.webView = wv
+    }
+    
+    func loadVideo(videoId: String) {
+        let html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>body { margin: 0; background: #000; overflow: hidden; }</style>
+        </head>
+        <body>
+        <div id="player"></div>
+        <script>
+          var tag = document.createElement('script');
+          tag.src = "https://www.youtube.com/iframe_api";
+          var firstScriptTag = document.getElementsByTagName('script')[0];
+          firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+          var player;
+          function onYouTubeIframeAPIReady() {
+            player = new YT.Player('player', {
+              height: '100%',
+              width: '100%',
+              videoId: '\(videoId)',
+              playerVars: {
+                'playsinline': 1,
+                'autoplay': 1,
+                'controls': 0,
+                'disablekb': 1,
+                'fs': 0,
+                'rel': 0,
+                'modestbranding': 1,
+                'origin': 'https://music.youtube.com'
+              },
+              events: {
+                'onReady': onPlayerReady,
+                'onStateChange': onPlayerStateChange,
+                'onError': onPlayerError
+              }
+            });
+          }
+
+          function onPlayerReady(event) {
+            event.target.playVideo();
+            window.webkit.messageHandlers.audioBridge.postMessage({
+              type: "ready",
+              duration: player.getDuration()
+            });
+            setInterval(function() {
+              if (player && player.getCurrentTime) {
+                window.webkit.messageHandlers.audioBridge.postMessage({
+                  type: "timeUpdate",
+                  currentTime: player.getCurrentTime(),
+                  duration: player.getDuration()
+                });
+              }
+            }, 250);
+          }
+
+          function onPlayerStateChange(event) {
+            window.webkit.messageHandlers.audioBridge.postMessage({
+              type: "stateChange",
+              state: event.data
+            });
+          }
+
+          function onPlayerError(event) {
+            window.webkit.messageHandlers.audioBridge.postMessage({
+              type: "error",
+              code: event.data
+            });
+          }
+        </script>
+        </body>
+        </html>
+        """
+        webView?.loadHTMLString(html, baseURL: URL(string: "https://music.youtube.com"))
+    }
+    
+    func play() {
+        webView?.evaluateJavaScript("if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }", completionHandler: nil)
+    }
+    
+    func pause() {
+        webView?.evaluateJavaScript("if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }", completionHandler: nil)
+    }
+    
+    func seek(to seconds: TimeInterval) {
+        webView?.evaluateJavaScript("if (typeof player !== 'undefined' && player.seekTo) { player.seekTo(\(seconds), true); }", completionHandler: nil)
+    }
+    
+    func setPlaybackRate(_ rate: Float) {
+        webView?.evaluateJavaScript("if (typeof player !== 'undefined' && player.setPlaybackRate) { player.setPlaybackRate(\(rate)); }", completionHandler: nil)
+    }
+    
+    // WKScriptMessageHandler
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let dict = message.body as? [String: Any],
+              let type = dict["type"] as? String else { return }
+        
+        DispatchQueue.main.async {
+            switch type {
+            case "ready":
+                if let dur = dict["duration"] as? Double, dur > 0 {
+                    AudioPlayerManager.shared.duration = dur
+                }
+                AudioPlayerManager.shared.isLoading = false
+                AudioPlayerManager.shared.isPlaying = true
+            case "timeUpdate":
+                if let cur = dict["currentTime"] as? Double {
+                    AudioPlayerManager.shared.currentTime = cur
+                }
+                if let dur = dict["duration"] as? Double, dur > 0 {
+                    AudioPlayerManager.shared.duration = dur
+                }
+                AudioPlayerManager.shared.onTimeUpdated()
+            case "stateChange":
+                if let state = dict["state"] as? Int {
+                    // YT.PlayerState: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering
+                    if state == 1 {
+                        AudioPlayerManager.shared.isPlaying = true
+                        AudioPlayerManager.shared.isLoading = false
+                    } else if state == 2 {
+                        AudioPlayerManager.shared.isPlaying = false
+                    } else if state == 3 {
+                        AudioPlayerManager.shared.isLoading = true
+                    } else if state == 0 {
+                        AudioPlayerManager.shared.handleTrackEnded()
+                    }
+                }
+            case "error":
+                print("[YouTubeAudioBridge] Error code:", dict["code"] ?? "")
+                AudioPlayerManager.shared.isLoading = false
+            default:
+                break
+            }
+        }
+    }
+}
+
+struct HeadlessAudioBridgeView: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView {
+        return YouTubeAudioBridge.shared.webView ?? WKWebView()
+    }
+    
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+}

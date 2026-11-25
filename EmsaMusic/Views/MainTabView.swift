@@ -38,6 +38,12 @@ struct MainTabView: View {
             }
             .accentColor(.cyan)
             
+            // Headless Audio Bridge for continuous YouTube audio stream & background playback
+            HeadlessAudioBridgeView()
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+            
             // Floating Mini Player right above Tab Bar
             if player.currentTrack != nil {
                 MiniPlayerView(showFullscreen: $showFullscreenPlayer)
