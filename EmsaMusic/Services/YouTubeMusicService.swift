@@ -409,4 +409,105 @@ class YouTubeMusicService {
         
         return nil
     }
+    
+    // Resolve Direct Native Audio Stream URL (itag 140 AAC-LC stereo)
+    private var cachedVisitorData: String?
+    private var visitorDataTimestamp: Date?
+    private let visionAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+    
+    private func fetchVisitorDataIfNeeded() async -> String? {
+        if let v = cachedVisitorData, let ts = visitorDataTimestamp, Date().timeIntervalSince(ts) < 14400 {
+            return v
+        }
+        guard let url = URL(string: "https://www.youtube.com/youtubei/v1/visitor_id?prettyPrint=false") else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(visionAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("101", forHTTPHeaderField: "X-YouTube-Client-Name")
+        req.setValue("1.02", forHTTPHeaderField: "X-YouTube-Client-Version")
+        
+        let body: [String: Any] = ["context": ["client": [
+            "clientName": "VISIONOS",
+            "clientVersion": "1.02",
+            "deviceMake": "Apple",
+            "deviceModel": "RealityDevice17,1",
+            "osName": "visionOS",
+            "osVersion": "26.5.23O471",
+            "userAgent": visionAgent,
+            "hl": "id",
+            "gl": "ID"
+        ]]]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        guard let (data, resp) = try? await session.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let respCtx = json["responseContext"] as? [String: Any],
+              let vis = respCtx["visitorData"] as? String, !vis.isEmpty else {
+            return nil
+        }
+        self.cachedVisitorData = vis
+        self.visitorDataTimestamp = Date()
+        return vis
+    }
+    
+    func resolveStreamURL(videoId: String) async -> URL? {
+        let visitorData = await fetchVisitorDataIfNeeded() ?? ""
+        
+        guard let url = URL(string: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false") else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(visionAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("101", forHTTPHeaderField: "X-YouTube-Client-Name")
+        req.setValue("1.02", forHTTPHeaderField: "X-YouTube-Client-Version")
+        
+        var clientObj: [String: Any] = [
+            "clientName": "VISIONOS",
+            "clientVersion": "1.02",
+            "deviceMake": "Apple",
+            "deviceModel": "RealityDevice17,1",
+            "osName": "visionOS",
+            "osVersion": "26.5.23O471",
+            "userAgent": visionAgent,
+            "hl": "id",
+            "gl": "ID",
+            "timeZone": "Asia/Jakarta",
+            "utcOffsetMinutes": 420
+        ]
+        if !visitorData.isEmpty {
+            clientObj["visitorData"] = visitorData
+        }
+        
+        let body: [String: Any] = [
+            "context": ["client": clientObj],
+            "videoId": videoId,
+            "playbackContext": ["contentPlaybackContext": ["html5Preference": "HTML5_PREF_WANTS"]],
+            "contentCheckOk": true,
+            "racyCheckOk": true
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        guard let (data, resp) = try? await session.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        
+        guard let streamingData = json["streamingData"] as? [String: Any],
+              let formats = streamingData["adaptiveFormats"] as? [[String: Any]] else {
+            return nil
+        }
+        
+        let audioFormats = formats.filter { ($0["mimeType"] as? String)?.contains("audio") == true && $0["url"] != nil }
+        let selected = audioFormats.first(where: { $0["itag"] as? Int == 140 })
+            ?? audioFormats.first(where: { ($0["mimeType"] as? String)?.contains("audio/mp4") == true })
+            ?? audioFormats.first
+        
+        if let directUrlStr = selected?["url"] as? String, let directUrl = URL(string: directUrlStr) {
+            return directUrl
+        }
+        return nil
+    }
 }

@@ -6,7 +6,12 @@ import UIKit
 class AudioPlayerManager: ObservableObject {
     static let shared = AudioPlayerManager()
     
+    // Pure Native AVPlayer Engine
+    private var avPlayer: AVPlayer?
+    private var timeObserver: Any?
+    private var endObserver: Any?
     private var sleepTimer: Timer?
+    private var cachedArtwork: UIImage?
     
     @Published var currentTrack: Track?
     @Published var queue: [Track] = []
@@ -37,7 +42,7 @@ class AudioPlayerManager: ObservableObject {
     
     private func setupAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay])
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("Failed to set audio session category: \(error)")
@@ -86,6 +91,7 @@ class AudioPlayerManager: ObservableObject {
         self.currentLyricIndex = 0
         self.currentTime = 0
         self.duration = Double(track.durationSeconds ?? 0)
+        self.cachedArtwork = nil
         
         LibraryStorageManager.shared.addToHistory(track: track)
         
@@ -128,9 +134,19 @@ class AudioPlayerManager: ObservableObject {
             }
         }
         
-        // 2. Play via YouTubeAudioBridge
-        YouTubeAudioBridge.shared.loadVideo(videoId: track.id)
-        updateNowPlaying(track: track, elapsed: 0, duration: duration)
+        // 2. Resolve Stream URL & Start Native AVPlayer (Spotify Architecture)
+        Task {
+            if let streamUrl = await YouTubeMusicService.shared.resolveStreamURL(videoId: track.id) {
+                await MainActor.run {
+                    self.startNativePlayback(url: streamUrl, track: track)
+                }
+            } else {
+                // Fallback to WebKit bridge if Google limits direct resolution
+                await MainActor.run {
+                    YouTubeAudioBridge.shared.loadVideo(videoId: track.id)
+                }
+            }
+        }
         
         // Artwork for lockscreen
         if let thumbUrl = URL(string: track.thumbnailUrl) {
@@ -138,6 +154,7 @@ class AudioPlayerManager: ObservableObject {
                 if let (data, _) = try? await URLSession.shared.data(from: thumbUrl),
                    let image = UIImage(data: data) {
                     await MainActor.run {
+                        self.cachedArtwork = image
                         self.updateNowPlaying(track: track, elapsed: self.currentTime, duration: self.duration, artwork: image)
                     }
                 }
@@ -145,10 +162,62 @@ class AudioPlayerManager: ObservableObject {
         }
     }
     
+    private func startNativePlayback(url: URL, track: Track) {
+        // Remove previous observers
+        if let observer = timeObserver {
+            avPlayer?.removeTimeObserver(observer)
+            timeObserver = nil
+        }
+        if let observer = endObserver {
+            NotificationCenter.default.removeObserver(observer)
+            endObserver = nil
+        }
+        
+        let asset = AVURLAsset(url: url, options: [
+            "AVURLAssetHTTPHeaderFieldsKey": [
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+            ]
+        ])
+        let playerItem = AVPlayerItem(asset: asset)
+        
+        if self.avPlayer == nil {
+            self.avPlayer = AVPlayer(playerItem: playerItem)
+            self.avPlayer?.actionAtItemEnd = .none
+        } else {
+            self.avPlayer?.replaceCurrentItem(with: playerItem)
+        }
+        
+        self.avPlayer?.play()
+        self.isPlaying = true
+        self.isLoading = false
+        
+        // Periodic time observer for smooth slider scrubbing & lyrics
+        let interval = CMTime(seconds: 0.25, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        self.timeObserver = self.avPlayer?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            guard let self = self else { return }
+            self.currentTime = time.seconds
+            if let dur = self.avPlayer?.currentItem?.duration.seconds, !dur.isNaN && dur > 0 {
+                self.duration = dur
+            }
+            self.onTimeUpdated()
+        }
+        
+        // Track finished observer
+        self.endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleTrackEnded()
+        }
+        
+        self.updateNowPlaying(track: track, elapsed: 0, duration: self.duration, artwork: self.cachedArtwork)
+    }
+    
     func onTimeUpdated() {
         updateCurrentLyricIndex()
         if let track = currentTrack {
-            updateNowPlaying(track: track, elapsed: currentTime, duration: duration)
+            updateNowPlaying(track: track, elapsed: currentTime, duration: duration, artwork: cachedArtwork)
         }
     }
     
@@ -214,14 +283,14 @@ class AudioPlayerManager: ObservableObject {
             if !isKaraokeMode {
                 isKaraokeMode = true
                 if let instId = cachedInstrumentalId {
-                    YouTubeAudioBridge.shared.swapToInstrumental(videoId: instId, atTime: currentTime)
+                    swapToInstrumental(videoId: instId)
                 } else {
                     Task {
                         if let instId = await YouTubeMusicService.shared.fetchInstrumentalTrack(title: track.title, artist: track.artist) {
                             await MainActor.run {
                                 self.cachedInstrumentalId = instId
                                 if self.isKaraokeMode {
-                                    YouTubeAudioBridge.shared.swapToInstrumental(videoId: instId, atTime: self.currentTime)
+                                    self.swapToInstrumental(videoId: instId)
                                 }
                             }
                         }
@@ -232,7 +301,25 @@ class AudioPlayerManager: ObservableObject {
             // Kembalikan vokal penuh asli
             if isKaraokeMode {
                 isKaraokeMode = false
-                YouTubeAudioBridge.shared.swapToInstrumental(videoId: track.id, atTime: currentTime)
+                swapToInstrumental(videoId: track.id)
+            }
+        }
+    }
+    
+    private func swapToInstrumental(videoId: String) {
+        let time = self.currentTime
+        Task {
+            if let streamUrl = await YouTubeMusicService.shared.resolveStreamURL(videoId: videoId) {
+                await MainActor.run {
+                    if let cur = self.currentTrack {
+                        self.startNativePlayback(url: streamUrl, track: cur)
+                        self.seek(to: time)
+                    }
+                }
+            } else {
+                await MainActor.run {
+                    YouTubeAudioBridge.shared.swapToInstrumental(videoId: videoId, atTime: time)
+                }
             }
         }
     }
@@ -274,26 +361,36 @@ class AudioPlayerManager: ObservableObject {
     }
     
     func pause() {
-        YouTubeAudioBridge.shared.pause()
         isPlaying = false
+        avPlayer?.pause()
+        YouTubeAudioBridge.shared.pause()
         if let track = currentTrack {
-            updateNowPlaying(track: track, elapsed: currentTime, duration: duration)
+            updateNowPlaying(track: track, elapsed: currentTime, duration: duration, artwork: cachedArtwork)
         }
     }
     
     func resume() {
-        YouTubeAudioBridge.shared.play()
         isPlaying = true
+        if avPlayer != nil {
+            avPlayer?.play()
+        } else {
+            YouTubeAudioBridge.shared.play()
+        }
         if let track = currentTrack {
-            updateNowPlaying(track: track, elapsed: currentTime, duration: duration)
+            updateNowPlaying(track: track, elapsed: currentTime, duration: duration, artwork: cachedArtwork)
         }
     }
     
     func seek(to seconds: TimeInterval) {
-        YouTubeAudioBridge.shared.seek(to: seconds)
         currentTime = seconds
+        if let player = avPlayer {
+            let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
+            player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        } else {
+            YouTubeAudioBridge.shared.seek(to: seconds)
+        }
         if let track = currentTrack {
-            updateNowPlaying(track: track, elapsed: seconds, duration: duration)
+            updateNowPlaying(track: track, elapsed: seconds, duration: duration, artwork: cachedArtwork)
         }
     }
     
@@ -318,6 +415,7 @@ class AudioPlayerManager: ObservableObject {
     
     func setPlaybackSpeed(_ speed: Float) {
         self.playbackSpeed = speed
+        avPlayer?.rate = speed
         YouTubeAudioBridge.shared.setPlaybackRate(speed)
     }
     
