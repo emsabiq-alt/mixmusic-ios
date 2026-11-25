@@ -134,18 +134,13 @@ class AudioPlayerManager: ObservableObject {
             }
         }
         
-        // 2. Resolve Stream URL & Start Native AVPlayer (Spotify Architecture)
-        Task {
-            if let streamUrl = await YouTubeMusicService.shared.resolveStreamURL(videoId: track.id) {
-                await MainActor.run {
-                    self.startNativePlayback(url: streamUrl, track: track)
-                }
-            } else {
-                // Fallback to WebKit bridge if Google limits direct resolution
-                await MainActor.run {
-                    YouTubeAudioBridge.shared.loadVideo(videoId: track.id)
-                }
+        // 2. Play Audio immediately via YouTubeAudioBridge (zero-latency, unmuted)
+        Task { @MainActor in
+            if let player = self.avPlayer {
+                player.pause()
+                self.avPlayer = nil
             }
+            YouTubeAudioBridge.shared.loadVideo(videoId: track.id)
         }
         
         // Artwork for lockscreen
@@ -308,19 +303,8 @@ class AudioPlayerManager: ObservableObject {
     
     private func swapToInstrumental(videoId: String) {
         let time = self.currentTime
-        Task {
-            if let streamUrl = await YouTubeMusicService.shared.resolveStreamURL(videoId: videoId) {
-                await MainActor.run {
-                    if let cur = self.currentTrack {
-                        self.startNativePlayback(url: streamUrl, track: cur)
-                        self.seek(to: time)
-                    }
-                }
-            } else {
-                await MainActor.run {
-                    YouTubeAudioBridge.shared.swapToInstrumental(videoId: videoId, atTime: time)
-                }
-            }
+        Task { @MainActor in
+            YouTubeAudioBridge.shared.swapToInstrumental(videoId: videoId, atTime: time)
         }
     }
     

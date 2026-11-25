@@ -8,6 +8,8 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     static let shared = YouTubeAudioBridge()
     
     var webView: WKWebView?
+    var isPlayerReady = false
+    var currentVideoId: String? = nil
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     
     override init() {
@@ -108,11 +110,12 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             
             if let wv = self.webView, wv.superview != window {
                 wv.removeFromSuperview()
-                wv.frame = CGRect(x: 0, y: 0, width: 2, height: 2)
-                wv.alpha = 0.01
+                // Standard 320x240 offscreen position with alpha 1.0 (prevents YouTube invisible player audio throttling)
+                wv.frame = CGRect(x: -500, y: -500, width: 320, height: 240)
+                wv.alpha = 1.0
                 wv.isUserInteractionEnabled = false
                 window.addSubview(wv)
-                print("[YouTubeAudioBridge] Attached permanently to root UIWindow!")
+                print("[YouTubeAudioBridge] Attached permanently to root UIWindow offscreen (320x240, alpha 1.0)!")
             }
         }
     }
@@ -170,12 +173,32 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     
     func loadVideo(videoId: String, startTime: TimeInterval = 0) {
+        currentVideoId = videoId
+        
+        // Fast path: Player already loaded -> loadVideoById in ~50ms (zero page reload delay)
+        if isPlayerReady {
+            let js = """
+            if (typeof player !== 'undefined' && player.loadVideoById) {
+                player.loadVideoById({
+                    videoId: '\(videoId)',
+                    startSeconds: Math.floor(\(startTime))
+                });
+                player.unMute();
+                player.setVolume(100);
+                player.playVideo();
+            }
+            """
+            webView?.evaluateJavaScript(js, completionHandler: nil)
+            return
+        }
+        
+        // Initial cold boot: Load standard YouTube iframe with unMute and volume 100
         let html = """
         <!DOCTYPE html>
         <html>
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>body { margin: 0; background: #000; overflow: hidden; }</style>
+        <style>body { margin: 0; background: #000; overflow: hidden; width: 100%; height: 100%; }</style>
         </head>
         <body>
         <div id="player"></div>
@@ -201,7 +224,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 'rel': 0,
                 'start': Math.floor(\(startTime)),
                 'modestbranding': 1,
-                'origin': 'https://music.youtube.com'
+                'origin': 'https://www.youtube.com'
               },
               events: {
                 'onReady': onPlayerReady,
@@ -212,6 +235,10 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerReady(event) {
+            try {
+              event.target.unMute();
+              event.target.setVolume(100);
+            } catch(e) {}
             event.target.playVideo();
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "ready",
@@ -229,6 +256,12 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerStateChange(event) {
+            if (event.data === 1) { // Playing: ensure unmuted and 100% volume
+              try {
+                event.target.unMute();
+                event.target.setVolume(100);
+              } catch(e) {}
+            }
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "stateChange",
               state: event.data
@@ -243,7 +276,10 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           window.userPlay = function() {
-            if (player && player.playVideo) player.playVideo();
+            if (player && player.playVideo) {
+              try { player.unMute(); player.setVolume(100); } catch(e) {}
+              player.playVideo();
+            }
           };
 
           window.userPause = function() {
@@ -256,6 +292,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 videoId: newVid,
                 startSeconds: Math.floor(keepSeconds || 0)
               });
+              try { player.unMute(); player.setVolume(100); } catch(e) {}
               player.playVideo();
             }
           };
@@ -263,7 +300,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         </body>
         </html>
         """
-        webView?.loadHTMLString(html, baseURL: URL(string: "https://music.youtube.com"))
+        webView?.loadHTMLString(html, baseURL: URL(string: "https://www.youtube.com"))
     }
     
     func play() {
@@ -295,6 +332,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         DispatchQueue.main.async {
             switch type {
             case "ready":
+                self.isPlayerReady = true
                 if let dur = dict["duration"] as? Double, dur > 0 {
                     AudioPlayerManager.shared.duration = dur
                 }
