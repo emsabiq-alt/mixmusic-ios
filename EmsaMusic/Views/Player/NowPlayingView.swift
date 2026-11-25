@@ -10,6 +10,8 @@ struct NowPlayingView: View {
     @State private var showSpeedSheet: Bool = false
     @State private var showSleepSheet: Bool = false
     @State private var showEqualizerSheet: Bool = false
+    @State private var isDraggingSlider: Bool = false
+    @State private var dragPosition: Double = 0.0
     
     // Spotify Signature Palette
     private let spotifyGreen = Color(hex: "1DB954")
@@ -178,16 +180,25 @@ struct NowPlayingView: View {
                     
                     Spacer(minLength: 12)
                     
-                    // 4. Scrubber Slider & Times
+                    // 4. Scrubber Slider & Times (Spotify Scrubbing Architecture)
                     VStack(spacing: 4) {
-                        Slider(value: Binding(
-                            get: { player.currentTime },
-                            set: { player.seek(to: $0) }
-                        ), in: 0...max(player.duration, 1))
+                        Slider(
+                            value: Binding(
+                                get: { isDraggingSlider ? dragPosition : player.currentTime },
+                                set: { dragPosition = $0 }
+                            ),
+                            in: 0...max(player.duration, 1),
+                            onEditingChanged: { editing in
+                                isDraggingSlider = editing
+                                if !editing {
+                                    player.seek(to: dragPosition)
+                                }
+                            }
+                        )
                         .accentColor(spotifyGreen)
                         
                         HStack {
-                            Text(formatTime(player.currentTime))
+                            Text(formatTime(isDraggingSlider ? dragPosition : player.currentTime))
                                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                                 .foregroundColor(Color(hex: "B3B3B3"))
                             Spacer()
