@@ -15,13 +15,37 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     private func setupWebView() {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
+        config.allowsPictureInPictureMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         
         let contentController = WKUserContentController()
         contentController.add(self, name: "audioBridge")
+        
+        // Inject MediaBackgrounding into ALL frames (including the YouTube iframe)
+        let backgroundScriptSource = """
+        (function() {
+            window.isUserPause = false;
+            try {
+                Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+                Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+            } catch(e) {}
+            
+            document.addEventListener('pause', function(e) {
+                if (e.target && e.target.tagName === 'VIDEO' && !window.isUserPause) {
+                    setTimeout(function() {
+                        if (!window.isUserPause && e.target.paused) {
+                            e.target.play().catch(function() {});
+                        }
+                    }, 50);
+                }
+            }, true);
+        })();
+        """
+        let userScript = WKUserScript(source: backgroundScriptSource, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        contentController.addUserScript(userScript)
         config.userContentController = contentController
         
-        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 2, height: 2), configuration: config)
+        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 180), configuration: config)
         wv.isOpaque = false
         wv.backgroundColor = .clear
         self.webView = wv
@@ -146,11 +170,21 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     
     func play() {
-        webView?.evaluateJavaScript("if (typeof window.userPlay !== 'undefined') { window.userPlay(); } else if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }", completionHandler: nil)
+        webView?.evaluateJavaScript("""
+        window.isUserPause = false;
+        if (typeof window.userPlay !== 'undefined') { window.userPlay(); }
+        else if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }
+        document.querySelectorAll('video').forEach(function(v) { v.play(); });
+        """, completionHandler: nil)
     }
     
     func pause() {
-        webView?.evaluateJavaScript("if (typeof window.userPause !== 'undefined') { window.userPause(); } else if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }", completionHandler: nil)
+        webView?.evaluateJavaScript("""
+        window.isUserPause = true;
+        if (typeof window.userPause !== 'undefined') { window.userPause(); }
+        else if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }
+        document.querySelectorAll('video').forEach(function(v) { v.pause(); });
+        """, completionHandler: nil)
     }
     
     func seek(to seconds: TimeInterval) {

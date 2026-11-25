@@ -20,8 +20,8 @@ struct EmsaMusicApp: App {
             ZStack {
                 MainTabView()
                 HeadlessAudioBridgeView()
-                    .frame(width: 1, height: 1)
-                    .opacity(0.01)
+                    .frame(width: 320, height: 180)
+                    .offset(x: -2000, y: -2000)
                     .allowsHitTesting(false)
             }
             .preferredColorScheme(.dark)
