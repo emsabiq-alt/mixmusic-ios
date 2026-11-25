@@ -329,7 +329,7 @@ class YouTubeMusicService {
     func fetchInstrumentalTrack(title: String, artist: String) async -> String? {
         let cleanTitle = LyricsService.shared.cleanTitle(title)
         let cleanArtist = LyricsService.shared.cleanArtist(artist)
-        let query = "\(cleanTitle) \(cleanArtist) instrumental"
+        let query = "\(cleanTitle) \(cleanArtist) karaoke"
         
         guard let url = URL(string: "https://music.youtube.com/youtubei/v1/search?prettyPrint=false") else {
             return nil
@@ -344,6 +344,7 @@ class YouTubeMusicService {
         request.setValue("1.20240501.01.00", forHTTPHeaderField: "X-YouTube-Client-Version")
         request.setValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
         
+        // Search specifically in Videos category (params: EgWKAQIQAWoKEAkQBRAKEAMQBA%3D%3D) for authentic karaoke
         let payload: [String: Any] = [
             "context": [
                 "client": [
@@ -353,7 +354,8 @@ class YouTubeMusicService {
                     "gl": "ID"
                 ]
             ],
-            "query": query
+            "query": query,
+            "params": "EgWKAQIQAWoKEAkQBRAKEAMQBA%3D%3D"
         ]
         
         guard let postBody = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
@@ -376,26 +378,29 @@ class YouTubeMusicService {
         }
         
         for section in sections {
-            // Check Card Shelf
-            if let card = section["musicCardShelfRenderer"] as? [String: Any] {
-                if let watch = (card["onTap"] as? [String: Any])?["watchEndpoint"] as? [String: Any],
-                   let vid = watch["videoId"] as? String, !vid.isEmpty {
-                    return vid
-                }
-            }
-            
-            // Check List Shelf
             if let shelf = section["musicShelfRenderer"] as? [String: Any],
                let items = shelf["contents"] as? [[String: Any]] {
                 for it in items {
                     if let r = it["musicResponsiveListItemRenderer"] as? [String: Any] {
+                        let flexCols = r["flexColumns"] as? [[String: Any]] ?? []
+                        var itemTitle = ""
+                        if !flexCols.isEmpty {
+                            let titleObj = flexCols[0]["musicResponsiveListItemFlexColumnRenderer"] as? [String: Any]
+                            let runs = (titleObj?["text"] as? [String: Any])?["runs"] as? [[String: Any]]
+                            itemTitle = runs?.first?["text"] as? String ?? ""
+                        }
+                        
                         var videoId = (r["playlistItemData"] as? [String: Any])?["videoId"] as? String
                         if videoId == nil || videoId?.isEmpty == true {
                             let nav = r["navigationEndpoint"] as? [String: Any]
                             videoId = (nav?["watchEndpoint"] as? [String: Any])?["videoId"] as? String
                         }
+                        
+                        let lower = itemTitle.lowercased()
                         if let vid = videoId, !vid.isEmpty {
-                            return vid
+                            if lower.contains("karaoke") || lower.contains("instrumental") || lower.contains("minus one") || lower.contains("tanpa vokal") {
+                                return vid
+                            }
                         }
                     }
                 }

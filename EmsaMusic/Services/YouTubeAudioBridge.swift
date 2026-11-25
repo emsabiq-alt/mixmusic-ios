@@ -38,12 +38,23 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         <body>
         <div id="player"></div>
         <script>
+          // Lock document visibility to prevent YouTube auto-pausing on tab switch or backgrounding
+          try {
+            Object.defineProperty(document, 'hidden', { get: function() { return false; } });
+            Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; } });
+          } catch(e) {}
+          window.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);
+          document.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);
+          window.addEventListener('blur', function(e) { e.stopImmediatePropagation(); }, true);
+
           var tag = document.createElement('script');
           tag.src = "https://www.youtube.com/iframe_api";
           var firstScriptTag = document.getElementsByTagName('script')[0];
           firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
           var player;
+          var userWantsPause = false;
+
           function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
               height: '100%',
@@ -69,6 +80,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerReady(event) {
+            userWantsPause = false;
             event.target.playVideo();
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "ready",
@@ -86,6 +98,13 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerStateChange(event) {
+            // Anti-Interruption: If YouTube tries to pause when user didn't tap pause, resume immediately!
+            if (event.data === 2 && !userWantsPause) {
+              if (player && player.playVideo) {
+                player.playVideo();
+                return;
+              }
+            }
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "stateChange",
               state: event.data
@@ -99,12 +118,24 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             });
           }
 
+          window.userPlay = function() {
+            userWantsPause = false;
+            if (player && player.playVideo) player.playVideo();
+          };
+
+          window.userPause = function() {
+            userWantsPause = true;
+            if (player && player.pauseVideo) player.pauseVideo();
+          };
+
           window.swapTrack = function(newVid, keepSeconds) {
+            userWantsPause = false;
             if (player && player.loadVideoById) {
               player.loadVideoById({
                 videoId: newVid,
                 startSeconds: Math.floor(keepSeconds || 0)
               });
+              player.playVideo();
             }
           };
         </script>
@@ -115,11 +146,11 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     
     func play() {
-        webView?.evaluateJavaScript("if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }", completionHandler: nil)
+        webView?.evaluateJavaScript("if (typeof window.userPlay !== 'undefined') { window.userPlay(); } else if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }", completionHandler: nil)
     }
     
     func pause() {
-        webView?.evaluateJavaScript("if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }", completionHandler: nil)
+        webView?.evaluateJavaScript("if (typeof window.userPause !== 'undefined') { window.userPause(); } else if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }", completionHandler: nil)
     }
     
     func seek(to seconds: TimeInterval) {

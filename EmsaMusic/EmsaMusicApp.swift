@@ -15,8 +15,14 @@ struct EmsaMusicApp: App {
     
     var body: some Scene {
         WindowGroup {
-            MainTabView()
-                .preferredColorScheme(.dark)
+            ZStack {
+                MainTabView()
+                HeadlessAudioBridgeView()
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                    .allowsHitTesting(false)
+            }
+            .preferredColorScheme(.dark)
         }
     }
 }
