@@ -9,6 +9,7 @@ struct NowPlayingView: View {
     @State private var showQueue: Bool = false
     @State private var showSpeedSheet: Bool = false
     @State private var showSleepSheet: Bool = false
+    @State private var showEqualizerSheet: Bool = false
     
     // Spotify Signature Palette
     private let spotifyGreen = Color(hex: "1DB954")
@@ -21,9 +22,24 @@ struct NowPlayingView: View {
             let artWidth = geo.size.width - (sidePadding * 2)
             
             ZStack {
-                // Spotify Vertical Atmospheric Gradient
+                // 1. Dynamic Artwork Ambient Aura (Apple Music & Spotify Live Ambient)
+                if let track = player.currentTrack, let url = URL(string: track.thumbnailUrl) {
+                    AsyncImage(url: url) { img in
+                        img.resizable()
+                            .scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                            .blur(radius: 65)
+                            .opacity(0.38)
+                    } placeholder: {
+                        EmptyView()
+                    }
+                    .ignoresSafeArea()
+                }
+                
+                // Spotify Vertical Atmospheric Gradient Overlay
                 LinearGradient(
-                    gradient: Gradient(colors: [spotifyBgTop, spotifyBgBottom]),
+                    gradient: Gradient(colors: [spotifyBgTop.opacity(0.85), spotifyBgBottom]),
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -42,10 +58,26 @@ struct NowPlayingView: View {
                         Spacer()
                         
                         VStack(spacing: 2) {
-                            Text("PLAYING FROM YOUR SEARCH")
-                                .font(.system(size: 10, weight: .bold))
-                                .tracking(1.2)
-                                .foregroundColor(.white.opacity(0.6))
+                            if player.isKaraokeMode {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "mic.fill")
+                                        .font(.system(size: 9))
+                                    Text("MODE KARAOKE AKTIF")
+                                        .font(.system(size: 10, weight: .black))
+                                        .tracking(1.2)
+                                }
+                                .foregroundColor(Color(hex: "FF2E93"))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color(hex: "FF2E93").opacity(0.2))
+                                .cornerRadius(8)
+                            } else {
+                                Text("MEMUTAR DARI KOLEKSI")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .tracking(1.2)
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            
                             Text(player.currentTrack?.artist ?? "EmsaMusic")
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundColor(.white)
@@ -55,6 +87,9 @@ struct NowPlayingView: View {
                         Spacer()
                         
                         Menu {
+                            Button(action: { showEqualizerSheet = true }) {
+                                Label("Equalizer: \(player.equalizerPreset.rawValue)", systemImage: "slider.vertical.3")
+                            }
                             Button(action: { showSpeedSheet = true }) {
                                 Label("Kecepatan: \(String(format: "%.2fx", player.playbackSpeed))", systemImage: "gauge.with.needle")
                             }
@@ -91,7 +126,7 @@ struct NowPlayingView: View {
                                     .scaledToFill()
                                     .frame(width: artWidth, height: artWidth)
                                     .cornerRadius(8)
-                                    .shadow(color: .black.opacity(0.45), radius: 20, x: 0, y: 12)
+                                    .shadow(color: .black.opacity(0.5), radius: 24, x: 0, y: 14)
                             } placeholder: {
                                 RoundedRectangle(cornerRadius: 8)
                                     .fill(Color(hex: "282828"))
@@ -106,7 +141,7 @@ struct NowPlayingView: View {
                     
                     Spacer(minLength: 16)
                     
-                    // 3. Track Title & Heart Row (Aligned exactly with Artwork)
+                    // 3. Track Title, Offline Download & Heart Row
                     if let track = player.currentTrack {
                         HStack(alignment: .center) {
                             VStack(alignment: .leading, spacing: 4) {
@@ -122,11 +157,20 @@ struct NowPlayingView: View {
                             
                             Spacer()
                             
+                            // Download Offline Button
+                            Button(action: { library.toggleDownload(track: track) }) {
+                                Image(systemName: library.isDownloaded(track: track) ? "arrow.down.circle.fill" : "arrow.down.circle")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(library.isDownloaded(track: track) ? spotifyGreen : Color(hex: "B3B3B3"))
+                                    .frame(width: 40, height: 44)
+                            }
+                            
+                            // Heart Liked Button
                             Button(action: { library.toggleLike(track: track) }) {
                                 Image(systemName: library.isLiked(track: track) ? "heart.fill" : "heart")
                                     .font(.system(size: 22))
                                     .foregroundColor(library.isLiked(track: track) ? spotifyGreen : Color(hex: "B3B3B3"))
-                                    .frame(width: 44, height: 44)
+                                    .frame(width: 40, height: 44)
                             }
                         }
                         .padding(.horizontal, sidePadding)
@@ -232,15 +276,28 @@ struct NowPlayingView: View {
                     
                     Spacer(minLength: 16)
                     
-                    // 6. Bottom Utilities (Connect Device, Lyrics & Queue toggles)
+                    // 6. Bottom Utilities (Karaoke Mic, Speaker, Lyrics & Queue toggles)
                     HStack {
-                        Button(action: {}) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "speaker.wave.2.fill")
-                                Text("iPhone Speaker")
+                        // Karaoke Mode Toggle Button
+                        Button(action: {
+                            withAnimation(.spring()) {
+                                player.toggleKaraokeMode()
+                                if player.isKaraokeMode {
+                                    showLyrics = true
+                                    showQueue = false
+                                }
                             }
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(spotifyGreen)
+                        }) {
+                            HStack(spacing: 5) {
+                                Image(systemName: player.isKaraokeMode ? "mic.fill" : "mic")
+                                Text(player.isKaraokeMode ? "Karaoke ON" : "Karaoke")
+                            }
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(player.isKaraokeMode ? Color(hex: "FF2E93") : Color(hex: "B3B3B3"))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(player.isKaraokeMode ? Color(hex: "FF2E93").opacity(0.2) : Color.white.opacity(0.08))
+                            .cornerRadius(14)
                         }
                         
                         Spacer()
@@ -286,6 +343,11 @@ struct NowPlayingView: View {
         .actionSheet(isPresented: $showSleepSheet) {
             ActionSheet(title: Text("Sleep Timer (Otomatis Berhenti)"), buttons: SleepTimerOption.allCases.map { opt in
                 .default(Text(opt.rawValue)) { player.setSleepTimer(option: opt) }
+            } + [.cancel()])
+        }
+        .actionSheet(isPresented: $showEqualizerSheet) {
+            ActionSheet(title: Text("Equalizer & Audio Preset"), message: Text("Pilih karakter suara yang kamu sukai:"), buttons: EqualizerPreset.allCases.map { preset in
+                .default(Text(preset.rawValue)) { player.setEqualizerPreset(preset) }
             } + [.cancel()])
         }
     }

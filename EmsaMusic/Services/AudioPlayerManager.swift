@@ -24,6 +24,9 @@ class AudioPlayerManager: ObservableObject {
     @Published var playbackSpeed: Float = 1.0
     @Published var sleepTimerOption: SleepTimerOption = .off
     @Published var sleepTimerRemainingSeconds: TimeInterval = 0
+    @Published var isKaraokeMode: Bool = false
+    @Published var equalizerPreset: EqualizerPreset = .flat
+    @Published var endlessAutoplay: Bool = true
     
     init() {
         setupAudioSession()
@@ -172,10 +175,42 @@ class AudioPlayerManager: ObservableObject {
         case .off:
             if !queue.isEmpty {
                 playNext()
+            } else if endlessAutoplay, let last = currentTrack {
+                // Radio mode: automatically fetch recommended tracks
+                Task {
+                    let related = await YouTubeMusicService.shared.fetchTrending()
+                    await MainActor.run {
+                        self.queue = related.filter { $0.id != last.id }
+                        self.playNext()
+                    }
+                }
             } else {
                 pause()
             }
         }
+    }
+    
+    func toggleKaraokeMode() {
+        guard let track = currentTrack else { return }
+        isKaraokeMode.toggle()
+        
+        if isKaraokeMode {
+            Task {
+                let query = "\(track.title) \(track.artist) karaoke minus one instrumental"
+                if let results = try? await YouTubeMusicService.shared.search(query: query),
+                   let instrumental = results.first {
+                    await MainActor.run {
+                        YouTubeAudioBridge.shared.swapToInstrumental(videoId: instrumental.id, atTime: self.currentTime)
+                    }
+                }
+            }
+        } else {
+            YouTubeAudioBridge.shared.swapToInstrumental(videoId: track.id, atTime: self.currentTime)
+        }
+    }
+    
+    func setEqualizerPreset(_ preset: EqualizerPreset) {
+        self.equalizerPreset = preset
     }
     
     func playNext() {

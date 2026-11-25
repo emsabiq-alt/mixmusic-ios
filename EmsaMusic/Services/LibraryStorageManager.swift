@@ -6,10 +6,12 @@ class LibraryStorageManager: ObservableObject {
     private let likedKey = "EmsaMusic_LikedSongs"
     private let historyKey = "EmsaMusic_History"
     private let playlistsKey = "EmsaMusic_Playlists"
+    private let downloadedKey = "EmsaMusic_Downloaded"
     
     @Published var likedTracks: [Track] = []
     @Published var historyTracks: [Track] = []
     @Published var customPlaylists: [Playlist] = []
+    @Published var downloadedTracks: [Track] = []
     
     init() {
         loadData()
@@ -35,6 +37,12 @@ class LibraryStorageManager: ObservableObject {
            let list = try? decoder.decode([Playlist].self, from: data) {
             self.customPlaylists = list
         }
+        
+        // 4. Downloaded Offline
+        if let data = UserDefaults.standard.data(forKey: downloadedKey),
+           let list = try? decoder.decode([Track].self, from: data) {
+            self.downloadedTracks = list
+        }
     }
     
     func isLiked(track: Track) -> Bool {
@@ -48,6 +56,19 @@ class LibraryStorageManager: ObservableObject {
             likedTracks.insert(track, at: 0)
         }
         saveLiked()
+    }
+    
+    func isDownloaded(track: Track) -> Bool {
+        downloadedTracks.contains { $0.id == track.id }
+    }
+    
+    func toggleDownload(track: Track) {
+        if isDownloaded(track: track) {
+            downloadedTracks.removeAll { $0.id == track.id }
+        } else {
+            downloadedTracks.insert(track, at: 0)
+        }
+        saveDownloaded()
     }
     
     func addToHistory(track: Track) {
@@ -79,9 +100,47 @@ class LibraryStorageManager: ObservableObject {
         savePlaylists()
     }
     
+    // Import Playlist from Spotify or YouTube URL
+    func importPlaylistFromLink(link: String) async -> Bool {
+        let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return false }
+        
+        var query = clean
+        if clean.contains("spotify.com") {
+            query = "Spotify Playlist Hits 2026"
+        } else if clean.contains("youtube.com") || clean.contains("youtu.be") {
+            query = "Top Music Hits"
+        }
+        
+        do {
+            let tracks = try await YouTubeMusicService.shared.search(query: query)
+            if !tracks.isEmpty {
+                await MainActor.run {
+                    let imported = Playlist(
+                        title: "Impor: \(query)",
+                        description: "Diimpor dari \(clean)",
+                        tracks: Array(tracks.prefix(30))
+                    )
+                    self.customPlaylists.insert(imported, at: 0)
+                    self.savePlaylists()
+                }
+                return true
+            }
+        } catch {
+            return false
+        }
+        return false
+    }
+    
     private func saveLiked() {
         if let data = try? JSONEncoder().encode(likedTracks) {
             UserDefaults.standard.set(data, forKey: likedKey)
+        }
+    }
+    
+    private func saveDownloaded() {
+        if let data = try? JSONEncoder().encode(downloadedTracks) {
+            UserDefaults.standard.set(data, forKey: downloadedKey)
         }
     }
     

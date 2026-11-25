@@ -27,7 +27,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         self.webView = wv
     }
     
-    func loadVideo(videoId: String) {
+    func loadVideo(videoId: String, startTime: TimeInterval = 0) {
         let html = """
         <!DOCTYPE html>
         <html>
@@ -56,6 +56,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 'disablekb': 1,
                 'fs': 0,
                 'rel': 0,
+                'start': Math.floor(\(startTime)),
                 'modestbranding': 1,
                 'origin': 'https://music.youtube.com'
               },
@@ -97,6 +98,15 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
               code: event.data
             });
           }
+
+          window.swapTrack = function(newVid, keepSeconds) {
+            if (player && player.loadVideoById) {
+              player.loadVideoById({
+                videoId: newVid,
+                startSeconds: Math.floor(keepSeconds || 0)
+              });
+            }
+          };
         </script>
         </body>
         </html>
@@ -118,6 +128,10 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     
     func setPlaybackRate(_ rate: Float) {
         webView?.evaluateJavaScript("if (typeof player !== 'undefined' && player.setPlaybackRate) { player.setPlaybackRate(\(rate)); }", completionHandler: nil)
+    }
+    
+    func swapToInstrumental(videoId: String, atTime: TimeInterval) {
+        webView?.evaluateJavaScript("if (typeof window.swapTrack !== 'undefined') { window.swapTrack('\(videoId)', \(atTime)); }", completionHandler: nil)
     }
     
     // WKScriptMessageHandler
@@ -143,7 +157,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 AudioPlayerManager.shared.onTimeUpdated()
             case "stateChange":
                 if let state = dict["state"] as? Int {
-                    // YT.PlayerState: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering
                     if state == 1 {
                         AudioPlayerManager.shared.isPlaying = true
                         AudioPlayerManager.shared.isLoading = false
