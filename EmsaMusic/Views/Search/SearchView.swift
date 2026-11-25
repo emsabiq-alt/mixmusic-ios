@@ -105,7 +105,7 @@ struct SearchView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(track.title)
                                         .font(.system(size: 15, weight: .semibold))
-                                        .foregroundColor(player.currentTrack?.id == track.id ? .cyan : .white)
+                                        .foregroundColor(player.currentTrack?.id == track.id ? Color(hex: "1DB954") : .white)
                                         .lineLimit(1)
                                     Text(track.artist)
                                         .font(.system(size: 13))
@@ -117,10 +117,10 @@ struct SearchView: View {
                                 
                                 if player.currentTrack?.id == track.id && player.isLoading {
                                     ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
+                                        .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "1DB954")))
                                 } else if player.currentTrack?.id == track.id && player.isPlaying {
                                     Image(systemName: "waveform")
-                                        .foregroundColor(.cyan)
+                                        .foregroundColor(Color(hex: "1DB954"))
                                 }
                             }
                             .contentShape(Rectangle())

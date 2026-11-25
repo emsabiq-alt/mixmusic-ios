@@ -36,7 +36,7 @@ struct MainTabView: View {
                     }
                     .tag(3)
             }
-            .accentColor(.cyan)
+            .accentColor(Color(hex: "1DB954"))
             
             // Headless Audio Bridge for continuous YouTube audio stream & background playback
             HeadlessAudioBridgeView()
