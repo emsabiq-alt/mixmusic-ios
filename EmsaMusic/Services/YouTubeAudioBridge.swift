@@ -30,15 +30,21 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
             } catch(e) {}
             
-            document.addEventListener('pause', function(e) {
-                if (e.target && e.target.tagName === 'VIDEO' && !window.isUserPause) {
-                    setTimeout(function() {
-                        if (!window.isUserPause && e.target.paused) {
-                            e.target.play().catch(function() {});
-                        }
-                    }, 50);
-                }
-            }, true);
+            if (!window.__nativeMediaPause) {
+                window.__nativeMediaPause = HTMLMediaElement.prototype.pause;
+                HTMLMediaElement.prototype.pause = function() {
+                    if (window.isUserPause) {
+                        return window.__nativeMediaPause.apply(this, arguments);
+                    }
+                    // Block OS / WebKit automatic background pause completely!
+                    return;
+                };
+            }
+            
+            window.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);
+            document.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);
+            window.addEventListener('pagehide', function(e) { e.stopImmediatePropagation(); }, true);
+            window.addEventListener('blur', function(e) { e.stopImmediatePropagation(); }, true);
         })();
         """
         let userScript = WKUserScript(source: backgroundScriptSource, injectionTime: .atDocumentStart, forMainFrameOnly: false)
@@ -122,12 +128,9 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerStateChange(event) {
-            // Anti-Interruption: If YouTube tries to pause when user didn't tap pause, resume immediately!
             if (event.data === 2 && !userWantsPause) {
-              if (player && player.playVideo) {
-                player.playVideo();
-                return;
-              }
+              // Ignore spurious pause notification from backgrounding
+              return;
             }
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "stateChange",
@@ -143,16 +146,19 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           window.userPlay = function() {
+            window.isUserPause = false;
             userWantsPause = false;
             if (player && player.playVideo) player.playVideo();
           };
 
           window.userPause = function() {
+            window.isUserPause = true;
             userWantsPause = true;
             if (player && player.pauseVideo) player.pauseVideo();
           };
 
           window.swapTrack = function(newVid, keepSeconds) {
+            window.isUserPause = false;
             userWantsPause = false;
             if (player && player.loadVideoById) {
               player.loadVideoById({
@@ -174,7 +180,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         window.isUserPause = false;
         if (typeof window.userPlay !== 'undefined') { window.userPlay(); }
         else if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }
-        document.querySelectorAll('video').forEach(function(v) { v.play(); });
         """, completionHandler: nil)
     }
     
@@ -183,7 +188,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         window.isUserPause = true;
         if (typeof window.userPause !== 'undefined') { window.userPause(); }
         else if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }
-        document.querySelectorAll('video').forEach(function(v) { v.pause(); });
         """, completionHandler: nil)
     }
     

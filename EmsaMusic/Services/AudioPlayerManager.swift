@@ -45,7 +45,6 @@ class AudioPlayerManager: ObservableObject {
         
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             if self?.isPlaying == true {
-                YouTubeAudioBridge.shared.play()
                 BackgroundAudioKeeper.shared.start()
             }
         }

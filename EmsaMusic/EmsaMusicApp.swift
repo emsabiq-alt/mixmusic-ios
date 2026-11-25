@@ -29,7 +29,6 @@ struct EmsaMusicApp: App {
         .onChange(of: scenePhase) { phase in
             if phase == .background {
                 if AudioPlayerManager.shared.isPlaying {
-                    YouTubeAudioBridge.shared.play()
                     BackgroundAudioKeeper.shared.start()
                 }
             }
