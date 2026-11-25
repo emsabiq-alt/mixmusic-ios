@@ -69,20 +69,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 hiddenAt = Date.now();
                 if (video && !video.paused && !video.ended) { wasPlaying = true; }
             }, true);
-
-            // Safety net: Auto-resume ONLY if pause was triggered by iOS backgrounding, NOT by user
-            document.addEventListener('pause', function (event) {
-                if (window.userWantsPause) { return; }
-                var video = event.target;
-                if (!video || video.tagName !== 'VIDEO') { return; }
-                if (!wasPlaying || Date.now() - hiddenAt > 2000) { return; }
-                var resume = function () {
-                    var promise = video.play();
-                    if (promise && promise.catch) { promise.catch(function () {}); }
-                };
-                resume();
-                setTimeout(resume, 200);
-            }, true);
         })();
         """
         let userScript = WKUserScript(source: backgroundScriptSource, injectionTime: .atDocumentStart, forMainFrameOnly: false)
@@ -188,13 +174,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 event.target.unMute();
                 event.target.setVolume(100);
               } catch(e) {}
-            }
-            // If paused unexpectedly while user did NOT want pause, auto-resume
-            if (event.data === 2 && !window.userWantsPause) {
-              if (player && player.playVideo) {
-                player.playVideo();
-                return;
-              }
             }
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "stateChange",
