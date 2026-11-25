@@ -59,13 +59,12 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             };
 
             window.__bgResume = function () {
-                if (window.isUserPause) { return; }
                 var video = currentVideo();
-                if (video && video.paused && !video.ended) {
+                if (video && video.paused && !video.ended && wasPlaying) {
                     var p = video.play();
                     if (p && p.catch) { p.catch(function () {}); }
                 }
-                if (typeof player !== 'undefined' && player.playVideo && player.getPlayerState && player.getPlayerState() !== 1) {
+                if (typeof player !== 'undefined' && player.playVideo && player.getPlayerState && player.getPlayerState() === 2 && wasPlaying) {
                     player.playVideo();
                 }
             };
@@ -87,21 +86,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             window.addEventListener('pagehide', function (event) {
                 var video = currentVideo();
                 hiddenAt = Date.now();
-                wasPlaying = !window.isUserPause && !!(video && !video.paused && !video.ended);
-            }, true);
-
-            // Instant auto-resume if iOS tries to pause media when user didn't request pause
-            document.addEventListener('pause', function (event) {
-                if (window.isUserPause) { return; }
-                var video = event.target;
-                if (!video || video.tagName !== 'VIDEO') { return; }
-                var resume = function () {
-                    if (!window.isUserPause) {
-                        var p = video.play();
-                        if (p && p.catch) { p.catch(function () {}); }
-                    }
-                };
-                resume();
+                if (video && !video.paused && !video.ended) { wasPlaying = true; }
             }, true);
         })();
         """
@@ -224,9 +209,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerStateChange(event) {
-            if (event.data === 2 && !userWantsPause) {
-              return;
-            }
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "stateChange",
               state: event.data
@@ -241,20 +223,14 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           window.userPlay = function() {
-            window.isUserPause = false;
-            userWantsPause = false;
             if (player && player.playVideo) player.playVideo();
           };
 
           window.userPause = function() {
-            window.isUserPause = true;
-            userWantsPause = true;
             if (player && player.pauseVideo) player.pauseVideo();
           };
 
           window.swapTrack = function(newVid, keepSeconds) {
-            window.isUserPause = false;
-            userWantsPause = false;
             if (player && player.loadVideoById) {
               player.loadVideoById({
                 videoId: newVid,
@@ -271,19 +247,11 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     
     func play() {
-        webView?.evaluateJavaScript("""
-        window.isUserPause = false;
-        if (typeof window.userPlay !== 'undefined') { window.userPlay(); }
-        else if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }
-        """, completionHandler: nil)
+        webView?.evaluateJavaScript("if (typeof window.userPlay !== 'undefined') { window.userPlay(); } else if (typeof player !== 'undefined' && player.playVideo) { player.playVideo(); }", completionHandler: nil)
     }
     
     func pause() {
-        webView?.evaluateJavaScript("""
-        window.isUserPause = true;
-        if (typeof window.userPause !== 'undefined') { window.userPause(); }
-        else if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }
-        """, completionHandler: nil)
+        webView?.evaluateJavaScript("if (typeof window.userPause !== 'undefined') { window.userPause(); } else if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }", completionHandler: nil)
     }
     
     func seek(to seconds: TimeInterval) {
