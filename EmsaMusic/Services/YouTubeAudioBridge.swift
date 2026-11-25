@@ -1,7 +1,6 @@
 import Foundation
 import WebKit
 import SwiftUI
-import UIKit
 import AVFoundation
 
 class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
@@ -10,17 +9,14 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     var webView: WKWebView?
     var isPlayerReady = false
     var currentVideoId: String? = nil
-    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     
     override init() {
         super.init()
         setupWebView()
-        observeLifecycle()
     }
     
     private func setupWebView() {
         let config = WKWebViewConfiguration()
-        config.defaultWebpagePreferences.preferredContentMode = .desktop
         config.allowsInlineMediaPlayback = true
         config.allowsPictureInPictureMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
@@ -74,8 +70,9 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 if (video && !video.paused && !video.ended) { wasPlaying = true; }
             }, true);
 
-            // Safety net: Only auto-resume if pause happened within 2000ms of app minimize/lock AND wasPlaying was true
+            // Safety net: Auto-resume ONLY if pause was triggered by iOS backgrounding, NOT by user
             document.addEventListener('pause', function (event) {
+                if (window.userWantsPause) { return; }
                 var video = event.target;
                 if (!video || video.tagName !== 'VIDEO') { return; }
                 if (!wasPlaying || Date.now() - hiddenAt > 2000) { return; }
@@ -92,99 +89,27 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         contentController.addUserScript(userScript)
         config.userContentController = contentController
         
-        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 320, height: 180), configuration: config)
+        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 2, height: 2), configuration: config)
         wv.isOpaque = false
         wv.backgroundColor = .clear
         self.webView = wv
     }
     
-    func attachToRootWindow() {
-        DispatchQueue.main.async {
-            guard let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }) as? UIWindowScene ?? UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    self.attachToRootWindow()
-                }
-                return
-            }
-            
-            if let wv = self.webView, wv.superview != window {
-                wv.removeFromSuperview()
-                // Standard 320x240 offscreen position with alpha 1.0 (prevents YouTube invisible player audio throttling)
-                wv.frame = CGRect(x: -500, y: -500, width: 320, height: 240)
-                wv.alpha = 1.0
-                wv.isUserInteractionEnabled = false
-                window.addSubview(wv)
-                print("[YouTubeAudioBridge] Attached permanently to root UIWindow offscreen (320x240, alpha 1.0)!")
-            }
-        }
-    }
-    
-    private func observeLifecycle() {
-        let center = NotificationCenter.default
-        
-        center.addObserver(
-            forName: UIApplication.willResignActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.keepPlayingInBackground()
-        }
-        
-        center.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.keepPlayingInBackground()
-        }
-    }
-    
-    private func keepPlayingInBackground() {
-        guard AudioPlayerManager.shared.isPlaying else { return }
-        
-        try? AVAudioSession.sharedInstance().setActive(true)
-        endBackgroundTask()
-        
-        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "EmsaMusicBackgroundAudio") { [weak self] in
-            self?.endBackgroundTask()
-        }
-        
-        Task { [weak self] in
-            for _ in 0..<12 {
-                guard let self = self, AudioPlayerManager.shared.isPlaying else { break }
-                _ = try? await self.webView?.evaluateJavaScript("""
-                if (typeof player !== 'undefined' && player.playVideo) {
-                    if (typeof player.getPlayerState === 'function' && player.getPlayerState() !== 1) {
-                        player.playVideo();
-                    }
-                }
-                """)
-                try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
-            }
-            self?.endBackgroundTask()
-        }
-    }
-    
-    private func endBackgroundTask() {
-        guard backgroundTask != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(backgroundTask)
-        backgroundTask = .invalid
-    }
-    
     func loadVideo(videoId: String, startTime: TimeInterval = 0) {
         currentVideoId = videoId
         
-        // Fast path: Player already loaded -> loadVideoById in ~50ms (zero page reload delay)
+        // Fast path: Player already loaded -> swapTrack in ~50ms
         if isPlayerReady {
             let js = """
-            if (typeof player !== 'undefined' && player.loadVideoById) {
+            if (typeof window.swapTrack !== 'undefined') {
+                window.swapTrack('\(videoId)', \(startTime));
+            } else if (typeof player !== 'undefined' && player.loadVideoById) {
+                window.userWantsPause = false;
                 player.loadVideoById({
                     videoId: '\(videoId)',
                     startSeconds: Math.floor(\(startTime))
                 });
-                player.unMute();
-                player.setVolume(100);
+                try { player.unMute(); player.setVolume(100); } catch(e) {}
                 player.playVideo();
             }
             """
@@ -192,7 +117,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             return
         }
         
-        // Initial cold boot: Load standard YouTube iframe with unMute and volume 100
+        // Initial load
         let html = """
         <!DOCTYPE html>
         <html>
@@ -209,6 +134,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
           var player;
+          window.userWantsPause = false;
 
           function onYouTubeIframeAPIReady() {
             player = new YT.Player('player', {
@@ -224,7 +150,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
                 'rel': 0,
                 'start': Math.floor(\(startTime)),
                 'modestbranding': 1,
-                'origin': 'https://www.youtube.com'
+                'origin': 'https://music.youtube.com'
               },
               events: {
                 'onReady': onPlayerReady,
@@ -235,6 +161,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerReady(event) {
+            window.userWantsPause = false;
             try {
               event.target.unMute();
               event.target.setVolume(100);
@@ -256,11 +183,18 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           function onPlayerStateChange(event) {
-            if (event.data === 1) { // Playing: ensure unmuted and 100% volume
+            if (event.data === 1) { // Playing: ensure unmuted
               try {
                 event.target.unMute();
                 event.target.setVolume(100);
               } catch(e) {}
+            }
+            // If paused unexpectedly while user did NOT want pause, auto-resume
+            if (event.data === 2 && !window.userWantsPause) {
+              if (player && player.playVideo) {
+                player.playVideo();
+                return;
+              }
             }
             window.webkit.messageHandlers.audioBridge.postMessage({
               type: "stateChange",
@@ -276,6 +210,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           }
 
           window.userPlay = function() {
+            window.userWantsPause = false;
             if (player && player.playVideo) {
               try { player.unMute(); player.setVolume(100); } catch(e) {}
               player.playVideo();
@@ -283,10 +218,14 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
           };
 
           window.userPause = function() {
-            if (player && player.pauseVideo) player.pauseVideo();
+            window.userWantsPause = true;
+            if (player && player.pauseVideo) {
+              player.pauseVideo();
+            }
           };
 
           window.swapTrack = function(newVid, keepSeconds) {
+            window.userWantsPause = false;
             if (player && player.loadVideoById) {
               player.loadVideoById({
                 videoId: newVid,
@@ -300,7 +239,7 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         </body>
         </html>
         """
-        webView?.loadHTMLString(html, baseURL: URL(string: "https://www.youtube.com"))
+        webView?.loadHTMLString(html, baseURL: URL(string: "https://music.youtube.com"))
     }
     
     func play() {
@@ -308,7 +247,6 @@ class YouTubeAudioBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     
     func pause() {
-        endBackgroundTask()
         webView?.evaluateJavaScript("if (typeof window.userPause !== 'undefined') { window.userPause(); } else if (typeof player !== 'undefined' && player.pauseVideo) { player.pauseVideo(); }", completionHandler: nil)
     }
     
