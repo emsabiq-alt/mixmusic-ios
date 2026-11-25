@@ -24,6 +24,7 @@
 		AA01000F0000000100000001 /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA02000F0000000100000001 /* LyricsView.swift */; };
 		AA0100100000000100000001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0200100000000100000001 /* SettingsView.swift */; };
 		AA0100110000000100000001 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0200110000000100000001 /* MainTabView.swift */; };
+		AA0100130000000100000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0200130000000100000001 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +47,7 @@
 		AA0200100000000100000001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/Settings/SettingsView.swift"; sourceTree = "<group>"; };
 		AA0200110000000100000001 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/MainTabView.swift"; sourceTree = "<group>"; };
 		AA0200120000000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Resources/Info.plist"; sourceTree = "<group>"; };
+		AA0200130000000100000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Resources/Assets.xcassets"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -88,6 +90,7 @@
 				AA0200100000000100000001 /* SettingsView.swift */,
 				AA0200110000000100000001 /* MainTabView.swift */,
 				AA0200120000000100000001 /* Info.plist */,
+				AA0200130000000100000001 /* Assets.xcassets */,
 			);
 			path = EmsaMusic;
 			sourceTree = "<group>";
@@ -157,6 +160,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0100130000000100000001 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -194,6 +198,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
@@ -230,6 +235,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
