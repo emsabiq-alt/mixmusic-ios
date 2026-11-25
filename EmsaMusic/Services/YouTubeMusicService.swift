@@ -15,6 +15,90 @@ class YouTubeMusicService {
         return []
     }
     
+    // Official Top 50 Indonesia Chart
+    func fetchTop50Indonesia() async -> [Track] {
+        guard let url = URL(string: "https://music.youtube.com/youtubei/v1/browse?prettyPrint=false") else {
+            return []
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://music.youtube.com/", forHTTPHeaderField: "Referer")
+        request.setValue("https://music.youtube.com", forHTTPHeaderField: "Origin")
+        request.setValue("67", forHTTPHeaderField: "X-YouTube-Client-Name")
+        request.setValue("1.20240501.01.00", forHTTPHeaderField: "X-YouTube-Client-Version")
+        request.setValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        
+        let payload: [String: Any] = [
+            "context": [
+                "client": [
+                    "clientName": "WEB_REMIX",
+                    "clientVersion": "1.20240501.01.00",
+                    "hl": "id",
+                    "gl": "ID"
+                ]
+            ],
+            "browseId": "VLPL4fGSI1pDJn5ObxTlEPlkkornHXUiKX1z"
+        ]
+        
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return await fetchTrending()
+        }
+        
+        let contents = json["contents"] as? [String: Any]
+        let twoCol = contents?["twoColumnBrowseResultsRenderer"] as? [String: Any]
+        let sec = twoCol?["secondaryContents"] as? [String: Any]
+        let secList = sec?["sectionListRenderer"] as? [String: Any]
+        let sections = secList?["contents"] as? [[String: Any]] ?? []
+        
+        var chartTracks: [Track] = []
+        for s in sections {
+            guard let shelf = s["musicPlaylistShelfRenderer"] as? [String: Any],
+                  let items = shelf["contents"] as? [[String: Any]] else { continue }
+            
+            for item in items {
+                guard let r = item["musicResponsiveListItemRenderer"] as? [String: Any],
+                      let flexCols = r["flexColumns"] as? [[String: Any]], !flexCols.isEmpty else { continue }
+                
+                let title = (flexCols[0]["musicResponsiveListItemFlexColumnRenderer"] as? [String: Any])?["text"] as? [String: Any]
+                let titleStr = ((title?["runs"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
+                
+                var artistStr = "Various Artists"
+                if flexCols.count > 1 {
+                    let artist = (flexCols[1]["musicResponsiveListItemFlexColumnRenderer"] as? [String: Any])?["text"] as? [String: Any]
+                    artistStr = ((artist?["runs"] as? [[String: Any]])?.first?["text"] as? String) ?? "Various Artists"
+                }
+                
+                var videoId = (r["playlistItemData"] as? [String: Any])?["videoId"] as? String
+                if videoId == nil || videoId?.isEmpty == true {
+                    let nav = r["navigationEndpoint"] as? [String: Any]
+                    videoId = (nav?["watchEndpoint"] as? [String: Any])?["videoId"] as? String
+                }
+                
+                var thumb = ""
+                if let thumbRenderer = (r["thumbnail"] as? [String: Any])?["musicThumbnailRenderer"] as? [String: Any],
+                   let thumbs = (thumbRenderer["thumbnail"] as? [String: Any])?["thumbnails"] as? [[String: Any]],
+                   let last = thumbs.last?["url"] as? String {
+                    thumb = last
+                }
+                
+                if let id = videoId, !id.isEmpty && !titleStr.isEmpty {
+                    chartTracks.append(Track(id: id, title: titleStr, artist: artistStr, thumbnailUrl: thumb, durationSeconds: nil))
+                }
+                
+                if chartTracks.count >= 50 { break }
+            }
+            if chartTracks.count >= 50 { break }
+        }
+        
+        return chartTracks.isEmpty ? await fetchTrending() : chartTracks
+    }
+    
     // 2. Search YouTube Music using MixMusic FilterSongs specification
     func search(query: String) async throws -> [Track] {
         guard let url = URL(string: "https://music.youtube.com/youtubei/v1/search?prettyPrint=false") else {

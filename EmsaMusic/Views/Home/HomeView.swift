@@ -4,8 +4,11 @@ struct HomeView: View {
     @ObservedObject var player = AudioPlayerManager.shared
     @ObservedObject var library = LibraryStorageManager.shared
     
+    @State private var top50Tracks: [Track] = []
     @State private var trendingTracks: [Track] = []
     @State private var isLoading: Bool = false
+    
+    private let spotifyGreen = Color(hex: "1DB954")
     
     let moods = [
         ("Santai & Chill", "cloud.sun.fill", Color.blue),
@@ -20,109 +23,91 @@ struct HomeView: View {
         NavigationView {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 26) {
-                    // Header Greeting
+                    // 1. Header Greeting
                     VStack(alignment: .leading, spacing: 4) {
                         Text(getGreeting())
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text("Temukan Musik Favoritmu")
-                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color(hex: "B3B3B3"))
+                        Text("EmsaMusic")
+                            .font(.system(size: 28, weight: .black, design: .rounded))
                             .foregroundColor(.white)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
                     
-                    // Quick Jump Back In (If history exists)
-                    if let lastTrack = library.historyTracks.first {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("LANJUTKAN MENDENGARKAN")
-                                .font(.system(size: 11, weight: .bold))
-                                .tracking(1.5)
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 20)
-                            
-                            HStack(spacing: 14) {
-                                AsyncImage(url: URL(string: lastTrack.thumbnailUrl)) { img in
-                                    img.resizable().scaledToFill().frame(width: 58, height: 58).cornerRadius(10)
-                                } placeholder: {
-                                    RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.2)).frame(width: 58, height: 58)
-                                }
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(lastTrack.title)
-                                        .font(.system(size: 15, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-                                    Text(lastTrack.artist)
-                                        .font(.system(size: 13))
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                                
-                                Spacer()
-                                
-                                Button(action: { player.play(track: lastTrack, fromQueue: library.historyTracks) }) {
-                                    Image(systemName: "play.circle.fill")
-                                        .font(.system(size: 38))
-                                        .foregroundColor(.cyan)
-                                }
-                            }
-                            .padding(14)
-                            .background(Color.white.opacity(0.06))
-                            .cornerRadius(16)
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                    
-                    // Trending Now Section
+                    // 2. Top 50 Indonesia Chart Banner (Spotlight)
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("SEDANG TREN HARI INI")
-                                .font(.system(size: 11, weight: .bold))
-                                .tracking(1.5)
-                                .foregroundColor(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("TANGGA LAGU RESMI")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .tracking(1.4)
+                                    .foregroundColor(spotifyGreen)
+                                Text("Top 50 Indonesia 🇮🇩")
+                                    .font(.system(size: 20, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
                             Spacer()
-                            Button(action: { loadTrending() }) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.caption)
-                                    .foregroundColor(.cyan)
+                            
+                            if !top50Tracks.isEmpty {
+                                NavigationLink(destination: PlaylistDetailView(title: "Top 50 Indonesia", tracks: top50Tracks)) {
+                                    Text("Lihat Semua")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundColor(spotifyGreen)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(Color.white.opacity(0.08))
+                                        .cornerRadius(12)
+                                }
                             }
                         }
                         .padding(.horizontal, 20)
                         
-                        if isLoading && trendingTracks.isEmpty {
+                        if top50Tracks.isEmpty && isLoading {
                             HStack {
                                 Spacer()
                                 ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
+                                    .progressViewStyle(CircularProgressViewStyle(tint: spotifyGreen))
                                     .padding(.vertical, 30)
                                 Spacer()
                             }
                         } else {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 14) {
-                                    ForEach(trendingTracks) { track in
+                                    ForEach(Array(top50Tracks.prefix(15).enumerated()), id: \.element.id) { index, track in
                                         VStack(alignment: .leading, spacing: 8) {
-                                            AsyncImage(url: URL(string: track.thumbnailUrl)) { img in
-                                                img.resizable().scaledToFill().frame(width: 140, height: 140).cornerRadius(14)
-                                            } placeholder: {
-                                                RoundedRectangle(cornerRadius: 14).fill(Color.gray.opacity(0.2)).frame(width: 140, height: 140)
+                                            ZStack(alignment: .topLeading) {
+                                                AsyncImage(url: URL(string: track.thumbnailUrl)) { img in
+                                                    img.resizable().scaledToFill().frame(width: 140, height: 140).cornerRadius(8)
+                                                } placeholder: {
+                                                    RoundedRectangle(cornerRadius: 8).fill(Color(hex: "282828")).frame(width: 140, height: 140)
+                                                }
+                                                
+                                                // Rank Badge #1, #2, #3
+                                                Text("#\(index + 1)")
+                                                    .font(.system(size: 11, weight: .black))
+                                                    .foregroundColor(.white)
+                                                    .padding(.horizontal, 7)
+                                                    .padding(.vertical, 4)
+                                                    .background(index < 3 ? spotifyGreen : Color.black.opacity(0.75))
+                                                    .cornerRadius(6)
+                                                    .padding(6)
                                             }
                                             
                                             Text(track.title)
-                                                .font(.system(size: 13, weight: .semibold))
+                                                .font(.system(size: 13, weight: .bold))
                                                 .foregroundColor(.white)
                                                 .lineLimit(1)
                                                 .frame(width: 140, alignment: .leading)
                                             Text(track.artist)
-                                                .font(.system(size: 11))
-                                                .foregroundColor(.secondary)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundColor(Color(hex: "B3B3B3"))
                                                 .lineLimit(1)
                                                 .frame(width: 140, alignment: .leading)
                                         }
                                         .contentShape(Rectangle())
                                         .onTapGesture {
-                                            player.play(track: track, fromQueue: trendingTracks)
+                                            player.play(track: track, fromQueue: top50Tracks)
                                         }
                                     }
                                 }
@@ -131,12 +116,101 @@ struct HomeView: View {
                         }
                     }
                     
-                    // Moods & Genres Grid
+                    // 3. Quick Jump Back In (If history exists)
+                    if let lastTrack = library.historyTracks.first {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("LANJUTKAN MENDENGARKAN")
+                                .font(.system(size: 11, weight: .bold))
+                                .tracking(1.4)
+                                .foregroundColor(Color(hex: "B3B3B3"))
+                                .padding(.horizontal, 20)
+                            
+                            HStack(spacing: 14) {
+                                AsyncImage(url: URL(string: lastTrack.thumbnailUrl)) { img in
+                                    img.resizable().scaledToFill().frame(width: 54, height: 54).cornerRadius(8)
+                                } placeholder: {
+                                    RoundedRectangle(cornerRadius: 8).fill(Color(hex: "282828")).frame(width: 54, height: 54)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(lastTrack.title)
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                    Text(lastTrack.artist)
+                                        .font(.system(size: 13))
+                                        .foregroundColor(Color(hex: "B3B3B3"))
+                                        .lineLimit(1)
+                                }
+                                
+                                Spacer()
+                                
+                                Button(action: { player.play(track: lastTrack, fromQueue: library.historyTracks) }) {
+                                    Image(systemName: "play.circle.fill")
+                                        .font(.system(size: 38))
+                                        .foregroundColor(spotifyGreen)
+                                }
+                            }
+                            .padding(12)
+                            .background(Color(hex: "1F1F1F"))
+                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                    
+                    // 4. Trending Hits
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("VIRAL HITS HARI INI")
+                                .font(.system(size: 11, weight: .bold))
+                                .tracking(1.4)
+                                .foregroundColor(Color(hex: "B3B3B3"))
+                            Spacer()
+                            Button(action: { loadData() }) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                                    .foregroundColor(spotifyGreen)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 14) {
+                                ForEach(trendingTracks) { track in
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        AsyncImage(url: URL(string: track.thumbnailUrl)) { img in
+                                            img.resizable().scaledToFill().frame(width: 140, height: 140).cornerRadius(8)
+                                        } placeholder: {
+                                            RoundedRectangle(cornerRadius: 8).fill(Color(hex: "282828")).frame(width: 140, height: 140)
+                                        }
+                                        
+                                        Text(track.title)
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .lineLimit(1)
+                                            .frame(width: 140, alignment: .leading)
+                                        Text(track.artist)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundColor(Color(hex: "B3B3B3"))
+                                            .lineLimit(1)
+                                            .frame(width: 140, alignment: .leading)
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        player.play(track: track, fromQueue: trendingTracks)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                    
+                    // 5. Moods & Genres Grid
                     VStack(alignment: .leading, spacing: 12) {
                         Text("SUASANA HATI & GENRE")
                             .font(.system(size: 11, weight: .bold))
-                            .tracking(1.5)
-                            .foregroundColor(.secondary)
+                            .tracking(1.4)
+                            .foregroundColor(Color(hex: "B3B3B3"))
                             .padding(.horizontal, 20)
                         
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
@@ -151,9 +225,9 @@ struct HomeView: View {
                                         .foregroundColor(.white)
                                 }
                                 .padding(16)
-                                .background(mood.2.opacity(0.35))
-                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(mood.2.opacity(0.5), lineWidth: 1))
-                                .cornerRadius(14)
+                                .background(mood.2.opacity(0.3))
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(mood.2.opacity(0.4), lineWidth: 1))
+                                .cornerRadius(12)
                                 .onTapGesture {
                                     playGenre(mood.0)
                                 }
@@ -165,12 +239,12 @@ struct HomeView: View {
                     Spacer(minLength: 80)
                 }
             }
-            .background(Color(hex: "090A0F").ignoresSafeArea())
+            .background(Color(hex: "121212").ignoresSafeArea())
             .navigationBarHidden(true)
         }
         .onAppear {
-            if trendingTracks.isEmpty {
-                loadTrending()
+            if top50Tracks.isEmpty {
+                loadData()
             }
         }
     }
@@ -183,12 +257,16 @@ struct HomeView: View {
         return "Selamat Malam 🌙"
     }
     
-    private func loadTrending() {
+    private func loadData() {
         isLoading = true
         Task {
-            let tracks = await YouTubeMusicService.shared.fetchTrending()
+            async let top50 = YouTubeMusicService.shared.fetchTop50Indonesia()
+            async let trending = YouTubeMusicService.shared.fetchTrending()
+            
+            let (topRes, trendRes) = await (top50, trending)
             await MainActor.run {
-                self.trendingTracks = tracks
+                self.top50Tracks = topRes
+                self.trendingTracks = trendRes
                 self.isLoading = false
             }
         }

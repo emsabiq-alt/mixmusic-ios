@@ -16,6 +16,7 @@ class AudioPlayerManager: ObservableObject {
     @Published var duration: TimeInterval = 0
     @Published var lyrics: [LyricLine] = []
     @Published var currentLyricIndex: Int = 0
+    @Published var lyricsOffset: Double = 0.0
     @Published var isLoading: Bool = false
     
     @Published var isShuffle: Bool = false
@@ -97,9 +98,13 @@ class AudioPlayerManager: ObservableObject {
             }
         }
         
-        // 1. Fetch lyrics async
+        // 1. Fetch lyrics async with duration targeting
         Task {
-            let fetchedLyrics = await LyricsService.shared.fetchLyrics(title: track.title, artist: track.artist)
+            let fetchedLyrics = await LyricsService.shared.fetchLyrics(
+                title: track.title,
+                artist: track.artist,
+                duration: self.duration > 0 ? self.duration : Double(track.durationSeconds ?? 0)
+            )
             await MainActor.run {
                 self.lyrics = fetchedLyrics
             }
@@ -131,14 +136,20 @@ class AudioPlayerManager: ObservableObject {
     
     private func updateCurrentLyricIndex() {
         guard !lyrics.isEmpty else { return }
+        let adjustedTime = currentTime + lyricsOffset
         for i in (0..<lyrics.count).reversed() {
-            if currentTime >= lyrics[i].time {
+            if adjustedTime >= lyrics[i].time {
                 if currentLyricIndex != i {
                     currentLyricIndex = i
                 }
                 break
             }
         }
+    }
+    
+    func adjustLyricsOffset(by delta: Double) {
+        lyricsOffset += delta
+        updateCurrentLyricIndex()
     }
     
     func handleTrackEnded() {
