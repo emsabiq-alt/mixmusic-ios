@@ -145,15 +145,33 @@ class AudioPlayerManager: ObservableObject {
         // 2. Resolve Stream URL (with Spotify hybrid bridge) & Start Native AVPlayer
         Task {
             var actualVideoId = track.id
-            if track.id.hasPrefix("sp:") {
+            var resolvedThumb = track.thumbnailUrl
+            
+            if track.id.hasPrefix("sp:") || track.thumbnailUrl.isEmpty {
                 if let found = try? await YouTubeMusicService.shared.search(query: "\(track.title) \(track.artist)"), let first = found.first {
                     actualVideoId = first.id
+                    if !first.thumbnailUrl.isEmpty {
+                        resolvedThumb = first.thumbnailUrl
+                        await MainActor.run {
+                            if self.currentTrack?.id == track.id {
+                                self.currentTrack = Track(
+                                    id: track.id,
+                                    title: track.title,
+                                    artist: track.artist,
+                                    thumbnailUrl: resolvedThumb,
+                                    durationSeconds: track.durationSeconds,
+                                    isKaraokeMode: track.isKaraokeMode
+                                )
+                            }
+                            LibraryStorageManager.shared.updateTrackThumbnail(trackId: track.id, newThumbnailUrl: resolvedThumb)
+                        }
+                    }
                 }
             }
             
             if let streamUrl = await YouTubeMusicService.shared.resolveStreamURL(videoId: actualVideoId) {
                 await MainActor.run {
-                    self.startNativePlayback(url: streamUrl, track: track)
+                    self.startNativePlayback(url: streamUrl, track: self.currentTrack ?? track)
                 }
             } else {
                 // Fallback to WebKit bridge if Google limits direct resolution
@@ -164,7 +182,8 @@ class AudioPlayerManager: ObservableObject {
         }
         
         // Artwork for lockscreen
-        if let thumbUrl = URL(string: track.thumbnailUrl) {
+        let artworkTargetUrl = track.thumbnailUrl
+        if let thumbUrl = URL(string: artworkTargetUrl), !artworkTargetUrl.isEmpty {
             Task {
                 if let (data, _) = try? await URLSession.shared.data(from: thumbUrl),
                    let image = UIImage(data: data) {

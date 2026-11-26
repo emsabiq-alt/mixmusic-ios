@@ -186,6 +186,10 @@ class LibraryStorageManager: ObservableObject {
               let entity = dataObj["entity"] as? [String: Any] else { return nil }
         
         let playlistTitle = entity["title"] as? String ?? "Spotify Playlist"
+        let coverArtObj = entity["coverArt"] as? [String: Any]
+        let sources = coverArtObj?["sources"] as? [[String: Any]]
+        let playlistCoverUrl = sources?.first?["url"] as? String ?? ""
+        
         let trackList = entity["trackList"] as? [[String: Any]] ?? []
         
         var result: [Track] = []
@@ -200,12 +204,35 @@ class LibraryStorageManager: ObservableObject {
                 id: "sp:\(id)",
                 title: trackTitle,
                 artist: artist,
-                thumbnailUrl: "",
+                thumbnailUrl: playlistCoverUrl,
                 durationSeconds: durationMs > 0 ? durationMs / 1000 : nil
             ))
         }
         
         return (playlistTitle, result)
+    }
+    
+    func updateTrackThumbnail(trackId: String, newThumbnailUrl: String) {
+        guard !newThumbnailUrl.isEmpty else { return }
+        var modified = false
+        for (pIndex, playlist) in customPlaylists.enumerated() {
+            for (tIndex, track) in playlist.tracks.enumerated() {
+                if track.id == trackId && (track.thumbnailUrl.isEmpty || track.thumbnailUrl != newThumbnailUrl) {
+                    customPlaylists[pIndex].tracks[tIndex] = Track(
+                        id: track.id,
+                        title: track.title,
+                        artist: track.artist,
+                        thumbnailUrl: newThumbnailUrl,
+                        durationSeconds: track.durationSeconds,
+                        isKaraokeMode: track.isKaraokeMode
+                    )
+                    modified = true
+                }
+            }
+        }
+        if modified {
+            savePlaylists()
+        }
     }
     
     private func saveLiked() {
