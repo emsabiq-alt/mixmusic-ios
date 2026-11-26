@@ -13,6 +13,11 @@ class AudioPlayerManager: ObservableObject {
     private var sleepTimer: Timer?
     private var cachedArtwork: UIImage?
     
+    // Preload Cache for Gapless Next Track
+    private var preloadedTrackId: String? = nil
+    private var preloadedStreamUrl: URL? = nil
+    private var isTransitioning: Bool = false
+    
     @Published var currentTrack: Track?
     @Published var queue: [Track] = []
     @Published var originalQueue: [Track] = []
@@ -93,6 +98,7 @@ class AudioPlayerManager: ObservableObject {
         self.currentTime = 0
         self.duration = Double(track.durationSeconds ?? 0)
         self.cachedArtwork = nil
+        self.isTransitioning = false
         
         LibraryStorageManager.shared.addToHistory(track: track)
         
@@ -142,8 +148,17 @@ class AudioPlayerManager: ObservableObject {
             }
         }
         
-        // 2. Resolve Stream URL (with Spotify hybrid bridge) & Start Native AVPlayer
+        // 2. Resolve Stream URL (with Instant Preload Cache) & Start Native AVPlayer
         Task {
+            // Check if URL was already pre-resolved during the previous song
+            if let preloadedId = self.preloadedTrackId, preloadedId == track.id, let cachedUrl = self.preloadedStreamUrl {
+                await MainActor.run {
+                    self.startNativePlayback(url: cachedUrl, track: self.currentTrack ?? track)
+                }
+                self.preloadNextTrackIfNeeded()
+                return
+            }
+            
             var actualVideoId = track.id
             var resolvedThumb = track.thumbnailUrl
             
@@ -173,6 +188,7 @@ class AudioPlayerManager: ObservableObject {
                 await MainActor.run {
                     self.startNativePlayback(url: streamUrl, track: self.currentTrack ?? track)
                 }
+                self.preloadNextTrackIfNeeded()
             } else {
                 // Fallback to WebKit bridge if Google limits direct resolution
                 await MainActor.run {
@@ -243,7 +259,8 @@ class AudioPlayerManager: ObservableObject {
             }
             
             // Auto-advance if we reached the end of the song (cuts off empty outro silence)
-            if self.duration > 0 && self.currentTime >= (self.duration - 0.5) && self.isPlaying {
+            if self.duration > 0 && self.currentTime >= (self.duration - 0.5) && self.isPlaying && !self.isTransitioning {
+                self.isTransitioning = true
                 self.handleTrackEnded()
                 return
             }
@@ -261,6 +278,32 @@ class AudioPlayerManager: ObservableObject {
         }
         
         self.updateNowPlaying(track: track, elapsed: 0, duration: self.duration, artwork: self.cachedArtwork)
+    }
+    
+    private func preloadNextTrackIfNeeded() {
+        var nextTrack: Track? = nil
+        if !queue.isEmpty {
+            nextTrack = queue.first
+        } else if !originalQueue.isEmpty, let cur = currentTrack, let idx = originalQueue.firstIndex(where: { $0.id == cur.id }) {
+            let nextIdx = (idx + 1) % originalQueue.count
+            nextTrack = originalQueue[nextIdx]
+        }
+        
+        guard let target = nextTrack else { return }
+        Task.detached(priority: .background) {
+            var actualId = target.id
+            if target.id.hasPrefix("sp:") {
+                if let found = try? await YouTubeMusicService.shared.search(query: "\(target.title) \(target.artist)"), let first = found.first {
+                    actualId = first.id
+                }
+            }
+            if let url = await YouTubeMusicService.shared.resolveStreamURL(videoId: actualId) {
+                await MainActor.run {
+                    self.preloadedTrackId = target.id
+                    self.preloadedStreamUrl = url
+                }
+            }
+        }
     }
     
     func onTimeUpdated() {
