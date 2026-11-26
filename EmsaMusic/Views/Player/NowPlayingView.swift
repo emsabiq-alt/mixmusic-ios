@@ -25,7 +25,16 @@ struct NowPlayingView: View {
             
             ZStack {
                 // 1. Dynamic Artwork Ambient Aura (Apple Music & Spotify Live Ambient)
-                if let track = player.currentTrack, let url = URL(string: track.thumbnailUrl) {
+                if let cachedImg = player.cachedArtwork {
+                    Image(uiImage: cachedImg)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                        .blur(radius: 65)
+                        .opacity(0.38)
+                        .ignoresSafeArea()
+                } else if let track = player.currentTrack, !track.thumbnailUrl.isEmpty, let url = URL(string: track.thumbnailUrl) {
                     AsyncImage(url: url) { img in
                         img.resizable()
                             .scaledToFill()
@@ -121,23 +130,45 @@ struct NowPlayingView: View {
                             .transition(.opacity)
                     } else {
                         // Spotify Perfect Square Artwork
-                        if let track = player.currentTrack, let url = URL(string: track.thumbnailUrl) {
-                            AsyncImage(url: url) { image in
-                                image
-                                    .resizable()
-                                    .scaledToFill()
+                        if let cachedImg = player.cachedArtwork {
+                            Image(uiImage: cachedImg)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: artWidth, height: artWidth)
+                                .cornerRadius(8)
+                                .shadow(color: .black.opacity(0.5), radius: 24, x: 0, y: 14)
+                        } else if let track = player.currentTrack, !track.thumbnailUrl.isEmpty, let url = URL(string: track.thumbnailUrl) {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: artWidth, height: artWidth)
+                                        .cornerRadius(8)
+                                        .shadow(color: .black.opacity(0.5), radius: 24, x: 0, y: 14)
+                                case .failure(_), .empty:
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color(hex: "282828"))
+                                        Image(systemName: "music.note")
+                                            .font(.system(size: 48))
+                                            .foregroundColor(Color(hex: "535353"))
+                                    }
                                     .frame(width: artWidth, height: artWidth)
-                                    .cornerRadius(8)
-                                    .shadow(color: .black.opacity(0.5), radius: 24, x: 0, y: 14)
-                            } placeholder: {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(hex: "282828"))
-                                    .frame(width: artWidth, height: artWidth)
+                                @unknown default:
+                                    EmptyView()
+                                }
                             }
                         } else {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(hex: "282828"))
-                                .frame(width: artWidth, height: artWidth)
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(hex: "282828"))
+                                Image(systemName: "music.note")
+                                    .font(.system(size: 48))
+                                    .foregroundColor(Color(hex: "535353"))
+                            }
+                            .frame(width: artWidth, height: artWidth)
                         }
                     }
                     

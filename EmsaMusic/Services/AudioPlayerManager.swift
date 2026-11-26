@@ -11,7 +11,7 @@ class AudioPlayerManager: ObservableObject {
     private var timeObserver: Any?
     private var endObserver: Any?
     private var sleepTimer: Timer?
-    private var cachedArtwork: UIImage?
+    @Published var cachedArtwork: UIImage?
     
     // Preload Cache for Gapless Next Track
     private var preloadedTrackId: String? = nil
@@ -179,6 +179,16 @@ class AudioPlayerManager: ObservableObject {
                                 )
                             }
                             LibraryStorageManager.shared.updateTrackThumbnail(trackId: track.id, newThumbnailUrl: resolvedThumb)
+                        }
+                        
+                        // Fetch artwork UIImage for Now Playing and Lockscreen immediately
+                        if let resolvedUrl = URL(string: resolvedThumb),
+                           let (data, _) = try? await URLSession.shared.data(from: resolvedUrl),
+                           let img = UIImage(data: data) {
+                            await MainActor.run {
+                                self.cachedArtwork = img
+                                self.updateNowPlaying(track: self.currentTrack ?? track, elapsed: self.currentTime, duration: self.duration, artwork: img)
+                            }
                         }
                     }
                 }
